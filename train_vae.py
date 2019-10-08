@@ -7,6 +7,9 @@ import torch.nn as nn
 import torch
 import matplotlib.pyplot as plt
 
+import multiprocessing as mp
+from multiprocessing import Pool
+
 mse_loss = nn.MSELoss()
 training_steps = 100
 beta = 10
@@ -33,14 +36,12 @@ def kl_divergence(mu, logvar):
     avg_kl = kls.mean()
     return avg_kl
 
-
 def train_vae():
     env = gym.make("CarRacing-v0")
     env.reset()
     beta_vae = BetaVAE()
     optimizer = optim.Adam(beta_vae.parameters())
 
-    print("finished setup")
     loss_hist = np.zeros((2, training_steps))
 
     for i in range(training_steps):
