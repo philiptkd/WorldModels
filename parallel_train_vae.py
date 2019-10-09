@@ -1,5 +1,3 @@
-# TODO: refactor into class
-
 import gym
 from PIL import Image
 import numpy as np
@@ -8,20 +6,11 @@ import torch.optim as optim
 import torch.nn as nn
 import torch
 import matplotlib.pyplot as plt
+import os
 
 import multiprocessing as mp
-from multiprocessing import Pool
+from multiprocessing import Pool, Pipe
 from random_stepper import gather_experience
-
-mse_loss = nn.MSELoss()
-training_steps = 100
-beta = 10
-
-def reconstruction_loss(x, x_recon):
-    batch_size = x.size(0)
-    assert batch_size != 0
-
-    return mse_loss(x, x_recon).div(batch_size)
 
 # both mu and logvar have shape (batch_size, 32)
 def kl_divergence(mu, logvar):
@@ -31,50 +20,74 @@ def kl_divergence(mu, logvar):
     avg_kl = kls.mean()
     return avg_kl
 
-def train_vae():
-    # setup workers
-    num_workers = os.cpu_count() # not sure of the performance implications of using all cores on workers, not leaving the main process one to itself
-    pipes = [Pipe(duplex=True) for worker in range(num_workers)] # one two-way pipe per worker
-    child_conns, parent_conns = zip(*pipes)
-    seeds = range(1234, 1234+num_workers) # arbitrary positive integers
-    process_args = zip(child_conns, seeds) # an iterable that yields one tuple of arguments per task/worker
+class Trainer():
+    def __init__(self):
+        self.loss_fn = nn.MSELoss(reduction="mean")
+        self.beta = 10
+        self.minibatch_size = 512
+        self.num_rollouts = 1
 
-    # prepare for vae training
-    beta_vae = BetaVAE()
-    optimizer = optim.Adam(beta_vae.parameters())
-    loss_hist = np.zeros((2, training_steps))
+        self.num_workers = 1#os.cpu_count() # not sure of the performance implications of using all cores on workers, not leaving the main process one to itself
+        self.seeds = range(self.num_workers) # arbitrary positive integers
 
-    with Pool(processes = num_workers) as pool:
-        pool.map_async(gather_experience, process_args, chunksize=1)
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        while True:
-            messages = [] # TODO: replace with replay buffer
-            for conn in parent_conns:
-                messages.append(conn.recv()) # blocks until there is something to receive or the connection is closed
-            # TODO: sample from replay buffer
-            train_step(minibatch)
+        # prepare for vae training
+        self.beta_vae = BetaVAE().to(self.device)
+        self.optimizer = optim.Adam(self.beta_vae.parameters())
+        self.loss_hist = []
+        self.replay_buffer = []
+        self.done = False
 
-    return loss_hist
+    def train_vae(self):
+        # setup workers
+        pipes = [Pipe(duplex=True) for worker in range(self.num_workers)] # one two-way pipe per worker
+        child_conns, parent_conns = zip(*pipes)
+        process_args = zip(self.seeds, child_conns, [self.num_rollouts]*self.num_workers) # an iterable that yields one tuple of arguments per task/worker
 
-def train_step(x):
-    x_recon, mu, logvar = beta_vae(x)
+        # create pool of workers
+        with Pool(processes = self.num_workers) as pool:
+            pool.map_async(gather_experience, process_args, chunksize=1)
 
-    recon_loss = reconstruction_loss(x, x_recon) 
-    kl_loss = beta*kl_divergence(mu, logvar)
-    loss = recon_loss + kl_loss
+            for rollout in range(self.num_rollouts):    
+                # get message from each worker before continuing
+                for i,conn in enumerate(parent_conns):
+                        print(i, "waiting")
+                        self.replay_buffer += conn.recv() # blocks until there is something to receive or the connection is closed
+                        print(i, "received")
 
-    loss_hist[0, i] = recon_loss.item()
-    loss_hist[1, i] = kl_loss.item()
-    print(i, loss.item())
+                #self.sample_minibatch()
+                #self.train_step()
+            print(self.replay_buffer)
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+    def sample_minibatch(self):
+        idxs = np.randint(0, len(self.replay_buffer), size=self.minibatch_size)
+        self.minibatch = torch.cat((obs for obs in self.replay_buffer[idxs]))
 
+    def train_step(self):
+        x = self.minibatch.to(device)
+        x_recon, mu, logvar = self.beta_vae(x)
 
-loss_hist = train_vae()
-plt.plot(range(training_steps), loss_hist[0], label="Recon Loss")
-plt.plot(range(training_steps), loss_hist[1], label="KL Loss")
-plt.plot(range(training_steps), np.sum(loss_hist, 0), label="Total Loss")
-plt.legend()
-plt.show()
+        recon_loss = self.loss_fn(x, x_recon)
+        kl_loss = self.beta*kl_divergence(mu, logvar)
+        loss = recon_loss + kl_loss
+
+        self.loss_hist.append((recon_loss.item(), kl_loss.item()))
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+    def plot_loss(self):
+        recon_loss, kl_loss = zip(*self.loss_hist)
+
+        plt.plot(recon_loss, label="Recon Loss")
+        plt.plot(kl_loss, label="KL Loss")
+        plt.plot(recon_loss + kl_loss, label="Total Loss")
+        plt.legend()
+        plt.show()
+
+if __name__ == '__main__':
+    trainer = Trainer()
+    trainer.train_vae()
+    #print(trainer.loss_hist)
