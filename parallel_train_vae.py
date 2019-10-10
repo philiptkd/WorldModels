@@ -25,9 +25,10 @@ class Trainer():
         self.loss_fn = nn.MSELoss(reduction="mean")
         self.beta = 10
         self.minibatch_size = 512
-        self.num_rollouts = 1
+        self.num_rollouts = 10
+        self.steps_per_rollout = 100
 
-        self.num_workers = 1#os.cpu_count() # not sure of the performance implications of using all cores on workers, not leaving the main process one to itself
+        self.num_workers = os.cpu_count() # not sure of the performance implications of using all cores on workers, not leaving the main process one to itself
         self.seeds = range(self.num_workers) # arbitrary positive integers
 
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -36,36 +37,39 @@ class Trainer():
         self.beta_vae = BetaVAE().to(self.device)
         self.optimizer = optim.Adam(self.beta_vae.parameters())
         self.loss_hist = []
-        self.replay_buffer = []
+        self.replay_buffer = None
         self.done = False
 
     def train_vae(self):
         # setup workers
         pipes = [Pipe(duplex=True) for worker in range(self.num_workers)] # one two-way pipe per worker
         child_conns, parent_conns = zip(*pipes)
-        process_args = zip(self.seeds, child_conns, [self.num_rollouts]*self.num_workers) # an iterable that yields one tuple of arguments per task/worker
+        process_args = zip(self.seeds, child_conns, [self.num_rollouts]*self.num_workers, [self.steps_per_rollout]*self.num_workers)
 
         # create pool of workers
         with Pool(processes = self.num_workers) as pool:
             pool.map_async(gather_experience, process_args, chunksize=1)
 
             for rollout in range(self.num_rollouts):    
+                print("rollout", rollout)
                 # get message from each worker before continuing
                 for i,conn in enumerate(parent_conns):
-                        print(i, "waiting")
-                        self.replay_buffer += conn.recv() # blocks until there is something to receive or the connection is closed
-                        print(i, "received")
+                    
+                    if self.replay_buffer is None:
+                        self.replay_buffer = conn.recv()
+                    else:
+                        self.replay_buffer = torch.cat((self.replay_buffer, conn.recv())) # blocks until there is something to receive
+                    print("received from worker",i)
 
-                #self.sample_minibatch()
-                #self.train_step()
-            print(self.replay_buffer)
+                self.sample_minibatch()
+                self.train_step()
 
     def sample_minibatch(self):
-        idxs = np.randint(0, len(self.replay_buffer), size=self.minibatch_size)
-        self.minibatch = torch.cat((obs for obs in self.replay_buffer[idxs]))
+        idxs = torch.randint(0, self.replay_buffer.shape[0], size=(self.minibatch_size,))
+        self.minibatch = torch.index_select(self.replay_buffer, 0, idxs)
 
     def train_step(self):
-        x = self.minibatch.to(device)
+        x = self.minibatch.to(self.device)
         x_recon, mu, logvar = self.beta_vae(x)
 
         recon_loss = self.loss_fn(x, x_recon)
@@ -90,4 +94,4 @@ class Trainer():
 if __name__ == '__main__':
     trainer = Trainer()
     trainer.train_vae()
-    #print(trainer.loss_hist)
+    print(trainer.loss_hist)
