@@ -15,10 +15,12 @@ def preprocess(img_arr, new_size=(64, 64)):
     
 def gather_experience(args):
     seed, conn, num_rollouts, steps_per_rollout = args
-    env = CarRacing(seed)
+    steps_reset_after = 1000 # after about how many steps to reset
+    rollouts_reset_after = steps_reset_after//(steps_per_rollout) + 1 # after how many rollouts to reset.
+    env = CarRacing(verbose=1, seed=seed)
     env.reset()
 
-    for _ in range(num_rollouts):
+    for i in range(num_rollouts):
         batch = None
         for _ in range(steps_per_rollout):
             a = env.action_space.sample()
@@ -32,5 +34,7 @@ def gather_experience(args):
 
             if done:
                 env.reset()
+        if (i+1)%rollouts_reset_after == 0:
+            env.reset()
         
         conn.send(batch) # send back tensor of shape (num_step, 3, 64, 64)
