@@ -12,7 +12,7 @@ def preprocess(img_arr, new_size=(64, 64)):
     new_arr = np.transpose(new_arr, (2, 0, 1)) # (3, 64, 64)
     return new_arr 
 
-def _gather_experience(args):
+def _gather_experience(args, ret):
     seed, num_rollouts = args
     env = CarRacing(verbose=1, seed=seed)
 
@@ -28,16 +28,19 @@ def _gather_experience(args):
             x = preprocess(obs) # (3, 64, 64)
             batch.append((a, x))
 
-    return batch
+    ret.append(batch)
 
 def gather_experience(args):
     import pstats
 
     prof_path = 'profiles/profile'+str(mp.current_process().pid)+'.prof'
     
-    cProfile.runctx('_gather_experience(args)', globals(), locals(), prof_path) # run the command and collect data
+    ret = []
+    cProfile.runctx('_gather_experience(args, ret)', globals(), locals(), prof_path) # run the command and collect data
     p = pstats.Stats(prof_path)
 
     print('\n')
     p.strip_dirs().sort_stats('cumulative').print_stats(10)
     print('\n')
+
+    return ret[0]

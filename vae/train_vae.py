@@ -12,6 +12,7 @@ import multiprocessing as mp
 from multiprocessing import Pool, Pipe
 from random_stepper import gather_experience
 from datetime import datetime
+import pickle
 
 
 # both mu and logvar have shape (batch_size, 32)
@@ -29,8 +30,8 @@ class Trainer():
         self.beta = 10
         self.epochs = 1
         
-        self.num_rollouts = 8
-        self.num_workers = os.cpu_count() # not sure of the performance implications of using all cores on workers, not leaving the main process one to itself
+        self.num_workers = 32#os.cpu_count() # not sure of the performance implications of using all cores on workers, not leaving the main process one to itself
+        self.num_rollouts = self.num_workers
         self.minibatch_size = 512
         
         self.seeds = range(self.num_workers) # arbitrary positive integers
@@ -43,11 +44,22 @@ class Trainer():
 
 
     def get_experience(self):
+        buffer_filename = "replay_buffer.pkl"
+        try:
+            with open(buffer_filename, "rb") as f:
+                self.replay_buffer = pickle.load(f)
+            return
+        except FileNotFoundError:
+            print("Replay buffer not found. Populating it now. It may take a while.")
+        
         worker_rollouts = self.num_rollouts//self.num_workers
         process_args = zip(self.seeds, [worker_rollouts]*self.num_workers)
 
         with Pool(processes = self.num_workers) as pool: # create pool of workers
-            return pool.map(gather_experience, process_args, chunksize=1) # let each gather experience
+            self.replay_buffer =  pool.map(gather_experience, process_args, chunksize=1) # let each gather experience
+
+        with open("replay_buffer.pkl", "wb") as f:
+            pickle.dump(self.replay_buffer, f)
 
 
     def train_vae(self):
