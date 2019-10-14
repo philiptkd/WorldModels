@@ -30,54 +30,47 @@ class Trainer():
         self.beta = 10
         self.epochs = 1
         
-        self.num_workers = 32#os.cpu_count() # not sure of the performance implications of using all cores on workers, not leaving the main process one to itself
-        self.num_rollouts = self.num_workers
+        self.num_workers = 32
+        self.num_rollouts =  10000
         self.minibatch_size = 512
         
-        self.seeds = range(self.num_workers) # arbitrary positive integers
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
         # prepare for vae training
         self.beta_vae = BetaVAE().to(self.device)
+        self.beta_vae.train()
         self.optimizer = optim.Adam(self.beta_vae.parameters())
         self.loss_hist = []
 
 
     def get_experience(self):
-        buffer_filename = "replay_buffer.pkl"
-        try:
-            with open(buffer_filename, "rb") as f:
-                self.replay_buffer = pickle.load(f)
-            return
-        except FileNotFoundError:
-            print("Replay buffer not found. Populating it now. It may take a while.")
-        
-        worker_rollouts = self.num_rollouts//self.num_workers
-        process_args = zip(self.seeds, [worker_rollouts]*self.num_workers)
+        rollout_idxs = range(self.num_rollouts)
 
         with Pool(processes = self.num_workers) as pool: # create pool of workers
-            self.replay_buffer =  pool.map(gather_experience, process_args, chunksize=1) # let each gather experience
-
-        with open("replay_buffer.pkl", "wb") as f:
-            pickle.dump(self.replay_buffer, f)
+            pool.map(gather_experience, rollout_idxs, chunksize=1) # let each gather experience
 
 
     def train_vae(self):
-        self.replay_buffer = self.get_experience() # list of (a, obs) tuples
-        sampler = self.minibatch_sampler()
+        data_dir = "data/1/"
+        for filename in os.listdir(data_dir): # for each rollout saved on disk
+
+            with open(data_dir+filename, "rb") as data:  # load it into RAM
+                self.replay_buffer = pickle.load(data)
+
+            sampler = self.minibatch_sampler() # generate minibatches from it
         
-        for minibatch in sampler:
-            self.minibatch = minibatch
-            self.train_step()
+            for minibatch in sampler: # train on each minibatch
+                self.minibatch = minibatch
+                self.train_step()
 
 
     def minibatch_sampler(self):
         actions, observations = zip(*self.replay_buffer)
-        num_minibatches = np.ceil(len(self.replay_buffer)/self.minibatch_size)
+        num_minibatches = int(np.ceil(len(self.replay_buffer)/self.minibatch_size))
 
         for epoch in range(self.epochs):
             X = torch.tensor(observations).float() # tensor with dim 0 being the length of the original list
-            shuffled_idxs = torch.tensor(np.random.permutation(len(replay_buffer)))
+            shuffled_idxs = torch.tensor(np.random.permutation(len(self.replay_buffer)))
             X = torch.index_select(X, 0, shuffled_idxs) # select the rows of X in shuffled order
             X = torch.chunk(X, num_minibatches, dim=0) # now a list of tensors
 

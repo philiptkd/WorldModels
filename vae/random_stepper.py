@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 import cProfile
 import multiprocessing as mp
+import pickle, pickletools
 
 def preprocess(img_arr, new_size=(64, 64)):
     img = Image.fromarray(img_arr)
@@ -12,35 +13,35 @@ def preprocess(img_arr, new_size=(64, 64)):
     new_arr = np.transpose(new_arr, (2, 0, 1)) # (3, 64, 64)
     return new_arr 
 
-def _gather_experience(args, ret):
-    seed, num_rollouts = args
-    env = CarRacing(verbose=1, seed=seed)
+def gather_experience(rollout_idx):
+    env = CarRacing()
+    env.reset()
+    batch = []
+    done = False
+    n_steps = 0
+    while not done:
+        n_steps += 1
+        a = env.action_space.sample()
+        obs, _, done, _ = env.step(a) # obs is 96 x 96 x 3 array of ints
+        x = preprocess(obs) # (3, 64, 64)
+        batch.append((a, x))
 
-    for i in range(num_rollouts):
-        print(i)
+    # write to disk
+    filename = "data/rollout%d.pkl"%rollout_idx
 
-        env.reset()
-        batch = []
-        done = False
-        while not done:
-            a = env.action_space.sample()
-            obs, _, done, _ = env.step(a) # obs is 96 x 96 x 3 array of ints
-            x = preprocess(obs) # (3, 64, 64)
-            batch.append((a, x))
+    # print troubleshooting info
+    print("rollout: "+str(rollout_idx)+", total steps: "+str(n_steps))
 
-    ret.append(batch)
-
-def gather_experience(args):
-    import pstats
-
-    prof_path = 'profiles/profile'+str(mp.current_process().pid)+'.prof'
+    try:
+        batch_bytes = pickletools.optimize(pickle.dumps(batch))
+    except MemoryError:
+        print("Memory Error at"+str(n_steps)+"steps.")
+        raise MemoryError
     
-    ret = []
-    cProfile.runctx('_gather_experience(args, ret)', globals(), locals(), prof_path) # run the command and collect data
-    p = pstats.Stats(prof_path)
+    with open(filename, "wb") as f:
+        f.write(batch_bytes)
 
-    print('\n')
-    p.strip_dirs().sort_stats('cumulative').print_stats(10)
-    print('\n')
-
-    return ret[0]
+    # None of this matters, probably
+    env.close()
+    del env, batch, batch_bytes, a, obs, x
+    
