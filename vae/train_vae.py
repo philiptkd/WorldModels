@@ -53,6 +53,7 @@ class Trainer():
     def train_vae(self):
         data_dir = "data/1/"
         for filename in os.listdir(data_dir): # for each rollout saved on disk
+            print("new file! #######################")
 
             with open(data_dir+filename, "rb") as data:  # load it into RAM
                 self.replay_buffer = pickle.load(data)
@@ -60,9 +61,11 @@ class Trainer():
             sampler = self.minibatch_sampler() # generate minibatches from it
         
             for minibatch in sampler: # train on each minibatch
+                print("new minibatch")
                 self.minibatch = minibatch
                 self.train_step()
 
+            break   # stopping after one file for testing
 
     def minibatch_sampler(self):
         actions, observations = zip(*self.replay_buffer)
@@ -110,11 +113,18 @@ class Trainer():
         #plt.show()
 
         timestr = get_time()
-        fig.savefig("plots/vae_loss_plot"+timestr+".png")
+
+        plots_dir = "plots"
+        if not os.path.exists(plots_dir):
+            os.makedirs(plots_dir)
+        fig.savefig(plots_dir+"/vae_loss_plot"+timestr+".png")
 
 
     def save_model(self, timestr):
-        torch.save(self.beta_vae.state_dict(), "models/model_"+timestr+".pt")
+        models_dir = "models"
+        if not os.path.exists(models_dir):
+            os.makedirs(models_dir)
+        torch.save(self.beta_vae.state_dict(), models_dir+"/model_"+timestr+".pt")
 
 
     def load_model(self, path):
