@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import os
 
 import multiprocessing as mp
-from multiprocessing import Pool, Pipe
+from multiprocessing import Pool
 from random_stepper import gather_experience
 from datetime import datetime
 import pickle
@@ -38,7 +38,6 @@ class Trainer():
 
         # prepare for vae training
         self.beta_vae = BetaVAE().to(self.device)
-        self.beta_vae.train()
         self.optimizer = optim.Adam(self.beta_vae.parameters())
         self.loss_hist = []
 
@@ -51,7 +50,9 @@ class Trainer():
 
 
     def train_vae(self):
-        data_dir = "data/1/"
+        self.beta_vae.train() # for dropout, batchnorm, and the like
+
+        data_dir = "data/rollouts/"
         for filename in os.listdir(data_dir): # for each rollout saved on disk
             print("new file! #######################")
 
@@ -67,14 +68,18 @@ class Trainer():
 
             break   # stopping after one file for testing
 
-    def minibatch_sampler(self):
+
+    def minibatch_sampler(self, shuffle=True):
         actions, observations = zip(*self.replay_buffer)
         num_minibatches = int(np.ceil(len(self.replay_buffer)/self.minibatch_size))
 
         for epoch in range(self.epochs):
             X = torch.tensor(observations).float() # tensor with dim 0 being the length of the original list
-            shuffled_idxs = torch.tensor(np.random.permutation(len(self.replay_buffer)))
-            X = torch.index_select(X, 0, shuffled_idxs) # select the rows of X in shuffled order
+            
+            if shuffle:
+                shuffled_idxs = torch.tensor(np.random.permutation(len(self.replay_buffer)))
+                X = torch.index_select(X, 0, shuffled_idxs) # select the rows of X in shuffled order
+            
             X = torch.chunk(X, num_minibatches, dim=0) # now a list of tensors
 
             for minibatch in X:
@@ -129,8 +134,7 @@ class Trainer():
 
     def load_model(self, path):
         self.beta_vae.load_state_dict(torch.load(path))
-        # don't forget to call model.eval() before inference
-
+        self.beta_vae.eval()
 
 def get_time():
     timestr = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
