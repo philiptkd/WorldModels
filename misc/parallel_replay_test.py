@@ -1,14 +1,5 @@
-#   create N = os.cpu_count() - 1 workers
-#   create a pipe for each worker
-#   call map_async(), passing experience gathering function and iterable of N seeds
-#   map_async() doesn't need to return anything upon completion
-#   each worker should periodically place batch of experience on pipe
-
-#   loop:    
-#       parent process receives experience tuples from each worker that has a batch ready
-#       if replay buffer is large enough:
-#           parent process sends minibatch from replay buffer to GPU for VAE training
-   
+# this was a prototype for distributed training back when I was still communicating with Pipes.
+# I've since stopped doing that in favor of writing to disk, but I'll leave this here for now just in case.
 
 import multiprocessing as mp
 from multiprocessing import Pool, Pipe

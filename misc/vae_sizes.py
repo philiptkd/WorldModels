@@ -1,3 +1,5 @@
+# This file was for finding the vae architecture that was self-consistent and as described in Ha's World Models paper
+
 import numpy as np
 import torch
 import torch.nn as nn

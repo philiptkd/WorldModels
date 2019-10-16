@@ -1,12 +1,13 @@
 import torch
 import torch.nn as nn
 
+# reparameterization trick / sampling
 def reparameterize(mu, logvar):
     std = logvar.div(2).exp()
     eps = torch.randn_like(std)
     return mu + std*eps
 
-# implementing as nn.Module with forward() allows view to be argument to nn.Sequential
+# implementing view as an nn.Module with forward() allows view to be an argument to nn.Sequential
 class View(nn.Module):
     def __init__(self, size):
         super(View, self).__init__()
@@ -15,6 +16,8 @@ class View(nn.Module):
     def forward(self, tensor):
         return tensor.view(self.size)
 
+# the beta-vae model
+# built according to specifications in the appendix of Ha's World Models paper
 class BetaVAE(nn.Module):
     def __init__(self):
         super(BetaVAE, self).__init__()

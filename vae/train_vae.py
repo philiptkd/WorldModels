@@ -23,7 +23,7 @@ def kl_divergence(mu, logvar):
     avg_kl = kls.mean()
     return avg_kl
 
-
+# class that interacts with the vae model during training
 class Trainer():
     def __init__(self):
         self.loss_fn = nn.MSELoss(reduction="mean")
@@ -42,6 +42,7 @@ class Trainer():
         self.loss_hist = []
 
 
+    # get random rollouts in environment
     def get_experience(self):
         rollout_idxs = range(self.num_rollouts)
 
@@ -49,6 +50,7 @@ class Trainer():
             pool.map(gather_experience, rollout_idxs, chunksize=1) # let each gather experience
 
 
+    # unsupervised training of vae on random rollouts collected by get_experience
     def train_vae(self):
         self.beta_vae.train() # for dropout, batchnorm, and the like
 
@@ -69,6 +71,7 @@ class Trainer():
             break   # stopping after one file for testing
 
 
+    # takes list of np arrays in self.replay_buffer and groups into minibatches
     def minibatch_sampler(self, shuffle=True):
         actions, observations = zip(*self.replay_buffer)
         num_minibatches = int(np.ceil(len(self.replay_buffer)/self.minibatch_size))
@@ -86,6 +89,7 @@ class Trainer():
                 yield minibatch
 
 
+    # defines loss and takes one step of gradient descent to minimize loss
     def train_step(self):
         x = self.minibatch.to(self.device)
         x_recon, mu, logvar = self.beta_vae(x)
@@ -101,6 +105,7 @@ class Trainer():
         self.optimizer.step()
 
 
+    # saves matplotlib figure of loss over the course of training
     def plot_loss(self, timestr):
         recon_loss, kl_loss = zip(*self.loss_hist)
         total_loss = [recon_loss[i] + kl_loss[i] for i in range(len(kl_loss))]
@@ -125,6 +130,7 @@ class Trainer():
         fig.savefig(plots_dir+"/vae_loss_plot"+timestr+".png")
 
 
+    # saves vae model parameters
     def save_model(self, timestr):
         models_dir = "models"
         if not os.path.exists(models_dir):
@@ -132,15 +138,19 @@ class Trainer():
         torch.save(self.beta_vae.state_dict(), models_dir+"/model_"+timestr+".pt")
 
 
+    # loads vae model parameters and prepares for inference
     def load_model(self, path):
         self.beta_vae.load_state_dict(torch.load(path))
         self.beta_vae.eval()
 
+
+# get a string representing the current time
 def get_time():
     timestr = datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
     return timestr
 
 
+# assumes that get_experience has already been called
 if __name__ == '__main__':
     trainer = Trainer()
     trainer.train_vae()

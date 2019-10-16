@@ -6,6 +6,7 @@ import cProfile
 import multiprocessing as mp
 import pickle, pickletools
 
+# transform image into size and type appropriate for our vae model
 def preprocess(img_arr, new_size=(64, 64)):
     img = Image.fromarray(img_arr)
     img = img.resize(new_size)
@@ -13,6 +14,7 @@ def preprocess(img_arr, new_size=(64, 64)):
     new_arr = np.transpose(new_arr, (2, 0, 1)) # (3, 64, 64)
     return new_arr 
 
+# randomly interact with the environment until we receive a 'done' signal. this is one rollout
 def gather_experience(rollout_idx):
     env = CarRacing()
     env.reset()
@@ -32,12 +34,7 @@ def gather_experience(rollout_idx):
     # print troubleshooting info
     print("rollout: "+str(rollout_idx)+", total steps: "+str(n_steps))
 
-    try:
-        batch_bytes = pickletools.optimize(pickle.dumps(batch))
-    except MemoryError:
-        print("Memory Error at"+str(n_steps)+"steps.")
-        raise MemoryError
-    
+    batch_bytes = pickletools.optimize(pickle.dumps(batch))
     with open(filename, "wb") as f:
         f.write(batch_bytes)
 
