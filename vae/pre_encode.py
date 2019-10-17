@@ -1,4 +1,4 @@
-from train_vae import Trainer
+from worldmodels.vae.train_vae import VAE_Trainer
 import os
 import pickle
 import torch
@@ -22,19 +22,22 @@ def encode_rollout(rollout_file):
     
     # encode to mu, std
     latents_list = []
-    for minibatch in sampler:
-        x = minibatch.to(trainer.device)
+    actions_list = []
+    for obs, acts in sampler:
+        x = obs.to(trainer.device)
         mu, logvar = trainer.beta_vae._encode(x)
         
         mu = mu.to(torch.device("cpu")).detach().numpy() # convert back to numpy arrays
         logvar = logvar.to(torch.device("cpu")).detach().numpy()
         latents_list.append((mu, logvar))
+        actions_list.append(acts)
 
     # organize rollout encodings
     mus, logvars = zip(*latents_list) # separate into two different lists
     mus = np.concatenate(mus) # make into one big array
     logvars = np.concatenate(logvars)
-    params = [mus, logvars]
+    actions = np.concatenate(actions_list)
+    params = [mus, logvars, actions]
 
     # write all encodings to file in data/encoded/ with name corresponding to rollout
     encoded_file_path = get_encoded_path(rollout_file)

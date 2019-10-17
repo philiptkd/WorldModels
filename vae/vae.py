@@ -1,12 +1,6 @@
 import torch
 import torch.nn as nn
 
-# reparameterization trick / sampling
-def reparameterize(mu, logvar):
-    std = logvar.div(2).exp()
-    eps = torch.randn_like(std)
-    return mu + std*eps
-
 # implementing view as an nn.Module with forward() allows view to be an argument to nn.Sequential
 class View(nn.Module):
     def __init__(self, size):
@@ -51,7 +45,7 @@ class BetaVAE(nn.Module):
 
     def forward(self, x):
         mu, logvar = self._encode(x)
-        z = reparameterize(mu, logvar)
+        z = self.reparameterize(mu, logvar)
         x_recon = self._decode(z).view(x.size())
         
         return x_recon, mu, logvar
@@ -64,3 +58,10 @@ class BetaVAE(nn.Module):
 
     def _decode(self, z):
         return self.decoder(z)
+
+    # reparameterization trick / sampling
+    def reparameterize(self, mu, logvar):
+        std = logvar.div(2).exp()
+        eps = torch.randn_like(std)
+        return mu + std*eps
+
