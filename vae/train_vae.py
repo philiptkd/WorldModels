@@ -48,9 +48,30 @@ class VAE_Trainer(Trainer):
             pool.map(gather_experience, rollout_idxs, chunksize=1) # let each gather experience
 
 
+    # takes list of np arrays in self.replay_buffer and groups into minibatches
+    def minibatch_sampler(self, shuffle=True):
+        actions, observations = zip(*self.replay_buffer)
+        num_minibatches = int(np.ceil(len(self.replay_buffer)/self.minibatch_size))
+
+        X = torch.tensor(observations).float() # tensor with dim 0 being the length of the original list
+        A = torch.tensor(actions).float()
+
+        if shuffle:
+            shuffled_idxs = torch.tensor(np.random.permutation(len(self.replay_buffer)))
+            X = torch.index_select(X, 0, shuffled_idxs) # select the rows of X in shuffled order
+            A = torch.index_select(A, 0, shuffled_idxs)
+
+        X = torch.chunk(X, num_minibatches, dim=0) # now a list of tensors
+        A = torch.chunk(A, num_minibatches, dim=0)
+
+        for x,a in zip(X,A):
+            yield x, a
+
+
     # defines loss and takes one step of gradient descent to minimize loss
     def train_step(self):
-        x = self.minibatch.to(self.device)
+        x, _ = self.minibatch
+        x = x.to(self.device)
         x_recon, mu, logvar = self.model(x)
 
         recon_loss = self.loss_fn(x, x_recon)

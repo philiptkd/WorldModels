@@ -16,23 +16,25 @@ class MDN_RNN(nn.Module):
     def __init__(self):
         super(MDN_RNN, self).__init__()
 
-        self.temperature = 1.15
+        self.temperature = 1.15 # may need to be tuned. the paper isn't clear
 
         self.rnn = nn.LSTMCell(input_size, hidden_size)
         self.gmm = nn.Sequential(
             nn.Linear(hidden_size, gmm_output_size),
             View((-1, num_gaussians, gaussian_size))
             )
-    
+
+        self.init_hidden_states()
+
+    def init_hidden_states(self):
+        self.h = torch.zeros((1, hidden_size))
+        self.c = torch.zeros((1, hidden_size))
+
+
     # takes input x with shape (batch_size, input_size)
-    # h0, c0, h, and c all have shape (batch_size, hidden_size)
-    def forward(self, x, h0=None, c0=None):
-        batch_size = x.shape[0]
-        
-        if h0 is None or c0 is None:
-            h, c = self.rnn(x)
-        else:
-            h, c = self.rnn(x, (h0, c0))
+    # h, and c all have shape (batch_size, hidden_size)
+    def forward(self, x):
+        self.h, self.c = self.rnn(x, (self.h, self.c))
 
         y = self.gmm(h) # (batch_size, num_gaussians, gaussian_size)
         Pis, mus, logvars = torch.split(y, split_sections, dim=2) # each of shape (batch_size, num_gaussians, -1)
@@ -40,7 +42,7 @@ class MDN_RNN(nn.Module):
     
         z = self.reparameterize(Pis, mus, logvars) # (batch_size, latent_size)
 
-        return z, h, c
+        return z
 
     # sampling with reparameterization trick
     def reparameterize(self, Pis, mus, logvars):
@@ -57,7 +59,7 @@ class MDN_RNN(nn.Module):
 
         # adapt indices to reshaped tensors
         batch_size = gaussian_idxs.shape[0]
-        batch_offsets = torch.tensor(range(batch_size))*num_gaussians # (batch_size, )
+        batch_offsets = torch.tensor(range(batch_size))*num_gaussians # (batch_size, ). [0, 5, 10, 15, ...]
         gaussian_idxs = gaussian_idxs.add(batch_offsets)
        
         # get parameters of selected gaussians
