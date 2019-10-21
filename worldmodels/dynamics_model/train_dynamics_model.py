@@ -5,6 +5,7 @@ from datetime import datetime
 import torch
 import matplotlib.pyplot as plt
 import os
+import pickle
 
 class RNN_Trainer(Trainer):
     def __init__(self):
@@ -55,6 +56,8 @@ class RNN_Trainer(Trainer):
         self.model.init_hidden_states() # reset h and c to zeros at start of each rollout
         
         # chunk into minibatches
+        batch_size = mus.shape[0]
+        num_minibatches = int(np.ceil(batch_size/self.minibatch_size))
         X_list = torch.chunk(X, num_minibatches, dim=0)
         Z_next_list = torch.chunk(Z_next, num_minibatches, dim=0)
 
@@ -64,9 +67,6 @@ class RNN_Trainer(Trainer):
 
     # samples a latent state and returns inputs and labels for rnn
     def get_inout(self, mus, logvars, actions):
-        batch_size = mus.shape[0]
-        num_minibatches = int(np.ceil(batch_size/self.minibatch_size))
-
         # reparameterize / sample z from mus, logvars
         std = np.exp(logvars/2)
         eps = np.random.randn(*std.shape)
@@ -142,5 +142,5 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         pass
 
-    trainer.save_model(timestr)
+    trainer.save_model(trainer.get_time())
     trainer.plot_loss()
