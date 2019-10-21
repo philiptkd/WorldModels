@@ -14,7 +14,7 @@ class RNN_Trainer(Trainer):
         self.epochs = 20
         self.num_workers = 32
         self.minibatch_size = 20
-        self.models_dir = "/home/phil/worldmodels/worldmodels/dynamics_model/models/"
+        self.models_dir = "/home/philip_raeisghasem/worldmodels/worldmodels/dynamics_model/models/"
         
         # prepare for vae training
         self.model = MDN_RNN().to(self.device)

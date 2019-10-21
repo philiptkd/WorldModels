@@ -6,7 +6,7 @@ import pickle
 import os
 
 # distributed parameters
-num_workers = 48
+num_workers = 24
 chunksize = 1
 
 # cma parameters
@@ -19,16 +19,15 @@ popsize = num_workers*chunksize
 def func_dist(solution_candidates):
     assert len(solution_candidates) == popsize
 
-    args = zip(solution_candidates, range(popsize))
     with Pool(processes = num_workers) as pool: # create pool of workers
-        return pool.map(get_fitness, args, chunksize=chunksize)
+        return pool.map(get_fitness, solution_candidates, chunksize=chunksize)
 
 
 if __name__ == '__main__':
     es = cma.CMAEvolutionStrategy(initial_guess, step_size, {'popsize': popsize})
     datalog = []
     
-    data_dir = "/home/phil/worldmodels/worldmodels/controller/data/"
+    data_dir = "/home/philip_raeisghasem/worldmodels/worldmodels/controller/data/"
     if not os.path.exists(data_dir):
         os.makedirs(data_dir) 
 

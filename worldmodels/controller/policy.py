@@ -21,17 +21,12 @@ c_input_size = latent_size+hidden_size
 action_size = 3
 num_params = c_input_size*action_size + action_size
 
-# exists for the purposes of profiling
-def get_fitness(args):
-    params, task_idx = args
-    ret = []
-    cProfile.runctx("_get_fitness(params, ret)", globals(), locals(), "profiles/profile%d.prof"%task_idx)
-    return -ret[0]    
-
-def _get_fitness(params, ret):
+def get_fitness(params):
     assert len(params) == num_params
 
     models_path = "/home/phil/worldmodels/worldmodels/working_models/"
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    cpu = torch.device("cpu")
 
     # get vae
     vae_trainer = VAE_Trainer()
@@ -41,12 +36,12 @@ def _get_fitness(params, ret):
     # get rnn
     rnn_trainer = RNN_Trainer()
     rnn_trainer.load_model(filepath=models_path+"rnn_model.pt")
-    rnn = rnn_trainer.model
+    rnn = rnn_trainer.model.to(cpu)
 
     # initialize environment
     env = CarRacing(verbose=0)
     state = env.reset()
-    ret.append(0)
+    ret = 0 # sum of rewards
     a = torch.Tensor([[0, 0, 0]]).float()
     done = False
 
@@ -58,17 +53,32 @@ def _get_fitness(params, ret):
     b_c = b_c.reshape((1, action_size)) # (1, 3)
     b_c = torch.tensor(b_c).float()
 
+    step = 0
     while not done:
+        step += 1
+        if step%100 == 0:
+            print(step)
+        
+        # vae
         state = torch.tensor(preprocess(state)) # (3, 64, 64)
         state = state.unsqueeze(dim=0).float() # (1, 3, 64, 64)
-        z = vae.encode(state) # (1, 32)
+        state = state.to(device)
+        z = vae.encode(state).to(cpu) # (1, 32)
+
+        # rnn
         rnn_input = torch.cat((z, a), dim=1) # (1, 35)
         z_pred = rnn(rnn_input) # (1, 32)
+        
+        # controller
         c_input = torch.cat((z, rnn.h), dim=1) # (1, 288)
         a = torch.mm(c_input, W_c) + b_c # (1,3)
+        
+        # env step
         a = clip_action(a) # now numpy array
         state, reward, done, _ = env.step(a.squeeze().detach().numpy())
-        ret[0] += reward
+        ret += reward
+
+    return -ret
 
 
 # ensures the action is within its bounding box
