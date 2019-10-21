@@ -14,6 +14,7 @@ class RNN_Trainer(Trainer):
         self.epochs = 20
         self.num_workers = 32
         self.minibatch_size = 20
+        self.models_dir = "/home/phil/worldmodels/worldmodels/dynamics_model/models/"
         
         # prepare for vae training
         self.model = MDN_RNN().to(self.device)
@@ -43,10 +44,10 @@ class RNN_Trainer(Trainer):
 
                 print(filename)
 
-                if not os.path.exists("models"):
-                    os.makedirs("models")
-                for f in os.listdir("models"): # remove all old models
-                    os.remove("models/"+f)
+                if not os.path.exists(self.models_dir):
+                    os.makedirs(self.models_dir)
+                for f in os.listdir(self.models_dir): # remove all old models
+                    os.remove(self.models_dir+f)
                 self.save_model(self.get_time()) # save current model
 
 

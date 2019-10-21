@@ -33,7 +33,8 @@ class VAE_Trainer(Trainer):
         self.epochs = 1
         self.num_workers = 24
         self.num_rollouts =  1000
-        
+        self.models_dir = "/home/phil/worldmodels/worldmodels/vae/models/"
+
         # prepare for vae training
         self.model = BetaVAE().to(self.device)
         self.optimizer = optim.Adam(self.model.parameters())

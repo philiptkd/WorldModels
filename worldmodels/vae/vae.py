@@ -65,3 +65,7 @@ class BetaVAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + std*eps
 
+    def encode(self, x):
+        mu, logvar = self._encode(x)
+        z = self.reparameterize(mu, logvar)
+        return z

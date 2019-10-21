@@ -1,0 +1,40 @@
+profiles/profile42.prof
+profiles/profile44.prof
+profiles/profile6.prof
+profiles/profile46.prof
+profiles/profile10.prof
+Mon Oct 21 07:46:55 2019    profiles/profile32.prof
+
+         2163709 function calls (2158909 primitive calls) in 295.159 seconds
+
+   Ordered by: cumulative time
+   List reduced from 1695 to 10 due to restriction <10>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+     90/1    0.001    0.000  295.160  295.160 {built-in method builtins.exec}
+        1    0.000    0.000  295.160  295.160 <string>:1(<module>)
+        1    0.016    0.016  295.160  295.160 /home/phil/worldmodels/worldmodels/controller/policy.py:31(_get_fitness)
+ 1600/377    0.032    0.000  254.099    0.674 /home/phil/miniconda3/envs/worldmodels/lib/python3.5/site-packages/torch/nn/modules/module.py:531(__call__)
+      189    0.006    0.000  232.270    1.229 /home/phil/miniconda3/envs/worldmodels/lib/python3.5/site-packages/torch/nn/modules/container.py:90(forward)
+       95    0.001    0.000  202.697    2.134 /home/phil/worldmodels/worldmodels/vae/vae.py:68(encode)
+       95    0.029    0.000  202.683    2.134 /home/phil/worldmodels/worldmodels/vae/vae.py:53(_encode)
+      377    0.011    0.000  202.554    0.537 /home/phil/miniconda3/envs/worldmodels/lib/python3.5/site-packages/torch/nn/modules/conv.py:344(forward)
+      377    0.004    0.000  202.541    0.537 /home/phil/miniconda3/envs/worldmodels/lib/python3.5/site-packages/torch/nn/modules/conv.py:334(conv2d_forward)
+      377  202.537    0.537  202.537    0.537 {built-in method conv2d}
+
+
+profiles/profile37.prof
+profiles/profile31.prof
+profiles/profile3.prof
+profiles/profile39.prof
+profiles/profile40.prof
+profiles/profile25.prof
+profiles/profile38.prof
+profiles/profile35.prof
+profiles/profile19.prof
+profiles/profile13.prof
+profiles/profile36.prof
+profiles/profile23.prof
+profiles/profile12.prof
+profiles/profile5.prof
+profiles/profile11.prof

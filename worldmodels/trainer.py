@@ -38,26 +38,27 @@ class Trainer():
     # saves vae model parameters
     #@profile
     def save_model(self, timestr):
-        models_dir = "models"
-        if not os.path.exists(models_dir):
-            os.makedirs(models_dir)
+        if not os.path.exists(self.models_dir):
+            os.makedirs(self.models_dir)
         
         torch.save({
                     'epoch': self.epoch,
                     'model_state_dict': self.model.state_dict(), 
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'loss_hist': self.loss_hist,
-                    }, models_dir+"/model_"+timestr+".pt")
+                    }, self.models_dir+"/model_"+timestr+".pt")
 
 
     # loads vae model parameters and prepares for inference
-    def load_model(self, train=True):
-        models_dir = "models/"
+    def load_model(self, filepath=None):
         try:
-            model_files_list = os.listdir(models_dir)
-            model_file = model_files_list[0]
-            
-            checkpoint = torch.load(models_dir+model_file)
+            if filepath is None:
+                model_files_list = os.listdir(self.models_dir)
+                model_file = model_files_list[0]
+                checkpoint = torch.load(self.models_dir+model_file)
+            else:
+                checkpoint = torch.load(filepath)
+
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.epoch = checkpoint['epoch']
@@ -65,4 +66,3 @@ class Trainer():
             self.model.eval()
         except:
             print("Failed to load model.")
-
