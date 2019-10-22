@@ -8,7 +8,6 @@ from datetime import datetime
 class Trainer():
     def __init__(self):
         self.minibatch_size = 512
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.loss_fn = nn.MSELoss(reduction="mean")
         self.epoch = 0
         self.loss_hist = []

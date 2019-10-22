@@ -36,6 +36,7 @@ class VAE_Trainer(Trainer):
         self.models_dir = "/home/philip_raeisghasem/worldmodels/worldmodels/vae/models/"
 
         # prepare for vae training
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.model = BetaVAE().to(self.device)
         self.optimizer = optim.Adam(self.model.parameters())
         self.load_model() # load pre-trained weights if they exist

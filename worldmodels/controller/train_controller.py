@@ -1,14 +1,10 @@
+# returns cumulative reward of rollout as fitness for the cma algorithm
 def get_fitness(params):
     assert len(params) == num_params
-
-    models_path = "/home/phil/worldmodels/worldmodels/working_models/"
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cpu = torch.device("cpu")
 
     # get rnn
     rnn_trainer = RNN_Trainer()
     rnn_trainer.load_model(filepath=models_path+"rnn_model.pt")
-    rnn = rnn_trainer.model.to(cpu)
 
     # initialize environment
     env = CarRacing(verbose=0)
@@ -84,11 +80,6 @@ if __name__ == '__main__':
     num_workers = 24
     chunksize = 1
 
-    # cma parameters
-    initial_guess = np.random.rand(num_params)
-    step_size = 1
-    popsize = num_workers*chunksize
-
     # controller parameters
     latent_size = 32
     hidden_size = 256
@@ -96,8 +87,18 @@ if __name__ == '__main__':
     action_size = 3
     num_params = c_input_size*action_size + action_size
 
+    # cma parameters
+    initial_guess = np.random.rand(num_params)
+    step_size = 1
+    popsize = num_workers*chunksize
+
+    # torch devices
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    cpu = torch.device("cpu")
+
     # get vae, to be shared by all processes
     vae_trainer = VAE_Trainer()
+    models_path = "/home/philip_raeisghasem/worldmodels/worldmodels/working_models/"
     vae_trainer.load_model(filepath=models_path+"vae_model.pt")
     vae = vae_trainer.model
 
