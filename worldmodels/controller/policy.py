@@ -1,42 +1,30 @@
-# to be the objective function to minimize within cma call
-# takes linear layer parameters as input
-# returns negative of cumulative reward received throughout episode
-# returns when environment returns 'done'
-
-# load both vae and rnn models
-# we're not calling backward() so no need to detach() model results
-# transform [z,h] with linear parameters into action
-# use tanh activation on actions to bound them to their appropriate range [(-1,1), (0,1), (0,1)]
-
-from worldmodels.vae.train_vae import VAE_Trainer
-from gym.envs.box2d.car_racing import CarRacing
 from worldmodels.dynamics_model.train_dynamics_model import RNN_Trainer
+from gym.envs.box2d.car_racing import CarRacing
 from worldmodels.vae.random_stepper import preprocess
 import torch
-import cProfile, pstats
 
+# controller parameters
 latent_size = 32
 hidden_size = 256
 c_input_size = latent_size+hidden_size
 action_size = 3
-num_params = c_input_size*action_size + action_size
+num_weights = c_input_size*action_size + action_size
 
-def get_fitness(params):
-    assert len(params) == num_params
+# torch devices
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+cpu = torch.device("cpu")
 
-    models_path = "/home/phil/worldmodels/worldmodels/working_models/"
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cpu = torch.device("cpu")
+models_path = "/home/philip_raeisghasem/worldmodels/worldmodels/working_models/"
 
-    # get vae
-    vae_trainer = VAE_Trainer()
-    vae_trainer.load_model(filepath=models_path+"vae_model.pt")
-    vae = vae_trainer.model
-
+# returns cumulative reward of rollout as fitness for the cma algorithm
+def get_fitness(args):
+    weights, vae = args
+    assert len(weights) == num_weights
+    
     # get rnn
     rnn_trainer = RNN_Trainer()
     rnn_trainer.load_model(filepath=models_path+"rnn_model.pt")
-    rnn = rnn_trainer.model.to(cpu)
+    rnn = rnn_trainer.model
 
     # initialize environment
     env = CarRacing(verbose=0)
@@ -45,11 +33,11 @@ def get_fitness(params):
     a = torch.Tensor([[0, 0, 0]]).float()
     done = False
 
-    # shape params
-    W_c = params[:-action_size] # the last 3 params are the bias terms
+    # shape weights
+    W_c = weights[:-action_size] # the last 3 weights are the bias terms
     W_c = W_c.reshape((c_input_size, action_size)) # (288, 3)
     W_c = torch.tensor(W_c).float()
-    b_c = params[-action_size:]
+    b_c = weights[-action_size:]
     b_c = b_c.reshape((1, action_size)) # (1, 3)
     b_c = torch.tensor(b_c).float()
 
