@@ -1,4 +1,3 @@
-#testing
 import sys, math
 import numpy as np
 
@@ -64,8 +63,6 @@ BORDER = 8/SCALE
 BORDER_MIN_COUNT = 4
 
 ROAD_COLOR = [0.4, 0.4, 0.4]
-
-MAX_STEPS = 2000 # added by me
 
 class FrictionDetector(contactListener):
     def __init__(self, env):
@@ -518,6 +515,6 @@ if __name__=="__main__":
                 #plt.savefig("test.jpeg")
             steps += 1
             isopen = env.render()
-            if done or restart or steps >= MAX_STEPS or isopen == False: # added MAX_STEPS condition
+            if done or restart or isopen == False:
                 break
     env.close()
