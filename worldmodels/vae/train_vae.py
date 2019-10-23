@@ -33,7 +33,7 @@ class VAE_Trainer(Trainer):
         self.epochs = 1
         self.num_workers = 24
         self.num_rollouts =  1000
-        self.models_dir = "/home/teslaadmin/worldmodels/worldmodels/vae/models/"
+        self.models_dir = "/home/philip_raeisghasem/worldmodels/worldmodels/vae/models/"
 
         # prepare for vae training
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

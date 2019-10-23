@@ -6,7 +6,7 @@ from worldmodels.controller.policy import get_fitness, num_weights, models_path
 #import worldmodels.cudaprofile as cudaprofile
 
 # distributed parameters
-num_workers = 16
+num_workers = 8
 chunksize = 1
 
 # cma parameters
@@ -31,12 +31,12 @@ if __name__ == '__main__':
         vae = vae_trainer.model
 
         # set up logging
-        data_dir = "/home/teslaadmin/worldmodels/worldmodels/controller/data/"
+        data_dir = "/home/philip_raeisghasem/worldmodels/worldmodels/controller/data/"
         if not os.path.exists(data_dir):
             os.makedirs(data_dir) 
 
         # run evolution strategy
-        es = cma.CMAEvolutionStrategy(initial_guess, step_size, {'popsize': popsize, 'maxiter': 1}) # TODO: remove maxiter arg 
+        es = cma.CMAEvolutionStrategy(initial_guess, step_size, {'popsize': popsize}) # TODO: remove maxiter arg 
         while not es.stop():
             weights_list = es.ask() # get potential solutions
             args = zip(weights_list, [vae]*popsize) # [vae]*popsize should only be list of refs, so much smaller than sizeof(vae)*popsize
