@@ -12,7 +12,7 @@ from gym.utils import colorize, seeding, EzPickle
 import pyglet
 from pyglet import gl
 
-from pyvirtualdisplay import Display
+#from pyvirtualdisplay import Display
 
 # Easiest continuous control task to learn from pixels, a top-down racing environment.
 # Discrete control is reasonable in this environment as well, on/off discretization is
@@ -129,8 +129,8 @@ class CarRacing(gym.Env, EzPickle):
         self.observation_space = spaces.Box(low=0, high=255, shape=(STATE_H, STATE_W, 3), dtype=np.uint8)
         
         # TESTING
-        self.display = Display(visible=0, size=(1400,900))
-        self.display.start()
+        #self.display = Display(visible=0, size=(1400,900))
+        #self.display.start()
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)

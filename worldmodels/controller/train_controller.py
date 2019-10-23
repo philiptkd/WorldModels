@@ -3,10 +3,10 @@ import cma, pickle, os, torch
 import numpy as np
 import multiprocessing as mp
 from worldmodels.controller.policy import get_fitness, num_weights, models_path
-import worldmodels.cudaprofile as cudaprofile
+#import worldmodels.cudaprofile as cudaprofile
 
 # distributed parameters
-num_workers = 4
+num_workers = 16
 chunksize = 1
 
 # cma parameters
@@ -31,7 +31,7 @@ if __name__ == '__main__':
         vae = vae_trainer.model
 
         # set up logging
-        data_dir = "/home/philip_raeisghasem/worldmodels/worldmodels/controller/data/"
+        data_dir = "/home/teslaadmin/worldmodels/worldmodels/controller/data/"
         if not os.path.exists(data_dir):
             os.makedirs(data_dir) 
 

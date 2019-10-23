@@ -3,7 +3,7 @@ from gym.envs.box2d.car_racing import CarRacing
 from worldmodels.vae.random_stepper import preprocess
 import torch
 
-models_path = "/home/philip_raeisghasem/worldmodels/worldmodels/working_models/"
+models_path = "/home/teslaadmin/worldmodels/worldmodels/working_models/"
 max_steps = 2000
 
 # controller parameters
