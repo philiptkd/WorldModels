@@ -6,7 +6,7 @@ from worldmodels.controller.policy import get_fitness, num_weights, models_path
 #import worldmodels.cudaprofile as cudaprofile
 
 # distributed parameters
-num_workers = 8
+num_workers = 16
 chunksize = 1
 
 # cma parameters
@@ -35,16 +35,21 @@ if __name__ == '__main__':
         if not os.path.exists(data_dir):
             os.makedirs(data_dir) 
 
+        fitness_hist = []
+
         # run evolution strategy
-        es = cma.CMAEvolutionStrategy(initial_guess, step_size, {'popsize': popsize}) # TODO: remove maxiter arg 
+        es = cma.CMAEvolutionStrategy(initial_guess, step_size, {'popsize': popsize})
         while not es.stop():
             weights_list = es.ask() # get potential solutions
             args = zip(weights_list, [vae]*popsize) # [vae]*popsize should only be list of refs, so much smaller than sizeof(vae)*popsize
             fitnesses = func_dist(args) # get rollout returns
-            
+            fitness_hist.append(fitnesses)
+
             # save progress
-            with open(data_dir+"progress.pt", "wb") as f:
-                pickle.dump((weights_list, fitnesses), f)
+            with open(data_dir+"latest_weights.pt", "wb") as f:
+                pickle.dump(weights_list, f)
+            with open(data_dir+"fitness_hist.pt", "wb") as f:
+                pickle.dump(fitness_hist, f)
 
             es.tell(weights_list, fitnesses) # update distribution according to solution fitnesses
             es.disp() # print one-line summary

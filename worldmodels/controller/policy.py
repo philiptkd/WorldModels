@@ -4,7 +4,7 @@ from worldmodels.vae.random_stepper import preprocess
 import torch
 
 models_path = "/home/philip_raeisghasem/worldmodels/worldmodels/working_models/"
-max_steps = 2000
+max_steps = 4000
 
 # controller parameters
 latent_size = 32
