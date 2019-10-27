@@ -13,9 +13,10 @@ gmm_output_size = num_gaussians*gaussian_size # output = [(Pi, mu, logvar)_1, ..
 split_sections = [1, latent_size, latent_size]
 
 class MDN_RNN(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(MDN_RNN, self).__init__()
 
+        self.device = device
         self.temperature = 1.15 # may need to be tuned. the paper isn't clear
 
         self.rnn = nn.LSTMCell(input_size, hidden_size)
@@ -28,8 +29,8 @@ class MDN_RNN(nn.Module):
         self.init_hidden_states()
 
     def init_hidden_states(self):
-        self.h = torch.zeros((1, hidden_size))
-        self.c = torch.zeros((1, hidden_size))
+        self.h = torch.zeros((1, hidden_size)).float().to(self.device)
+        self.c = torch.zeros((1, hidden_size)).float().to(self.device)
 
 
     # takes input x with shape (batch_size, input_size)
@@ -52,7 +53,8 @@ class MDN_RNN(nn.Module):
         logvars += np.log(self.temperature) # same as multiplying variance by temperature
         
         # pick a gaussian for each example in batch by sampling from categorical distribution in Pis
-        gaussian_idxs = torch.multinomial(Pis, num_samples=1).squeeze(dim=1) # (batch_size, )
+        gaussian_idxs = torch.multinomial(Pis, num_samples=1).squeeze(dim=1)# (batch_size, )
+        gaussian_idxs = gaussian_idxs.to(self.device)
 
         # make 2d matrix, where each row is a parameter
         mus = mus.reshape((-1, latent_size)) 
@@ -61,6 +63,7 @@ class MDN_RNN(nn.Module):
         # adapt indices to reshaped tensors
         batch_size = gaussian_idxs.shape[0]
         batch_offsets = torch.tensor(range(batch_size))*num_gaussians # (batch_size, ). [0, 5, 10, 15, ...]
+        batch_offsets = batch_offsets.to(self.device)
         gaussian_idxs = gaussian_idxs.add(batch_offsets)
        
         # get parameters of selected gaussians

@@ -17,8 +17,8 @@ class RNN_Trainer(Trainer):
         self.models_dir = "/home/philip_raeisghasem/worldmodels/worldmodels/dynamics_model/models/"
         
         # prepare for vae training
-        self.device = torch.device("cpu") # leave RNN on cpu to leave gpu free for more VAE inferences
-        self.model = MDN_RNN().to(self.device)
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.model = MDN_RNN(self.device).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters())
 
 

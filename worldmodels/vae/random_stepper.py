@@ -8,11 +8,21 @@ import pickle, pickletools
 
 # transform image into size and type appropriate for our vae model
 def preprocess(img_arr, new_size=(64, 64)):
-    img = Image.fromarray(img_arr)
-    img = img.resize(new_size)
-    new_arr = np.asarray(img)/255.0 # (64, 64, 3)
-    new_arr = np.transpose(new_arr, (2, 0, 1)) # (3, 64, 64)
-    return new_arr 
+    # make batch of images
+    if len(img_arr.shape) == 3:
+        img_arr = img_arr[None]
+    assert len(img_arr.shape) == 4
+
+    # resize each image in batch with Pillow
+    arr_batch = []
+    for img in img_arr:
+        img = Image.fromarray(img)
+        img = img.resize(new_size)
+        new_arr = np.asarray(img)/255.0 # (64, 64, 3)
+        new_arr = np.transpose(new_arr, (2, 0, 1)) # (3, 64, 64)
+        arr_batch.append(new_arr)
+    arr_batch = np.stack(arr_batch)
+    return arr_batch
 
 # randomly interact with the environment until we receive a 'done' signal. this is one rollout
 def gather_experience(rollout_idx):
