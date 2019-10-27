@@ -49,22 +49,23 @@ class MyPolicy(TanhGaussianPolicy):
             obs,
             last_action,
         ):
+        with torch.no_grad():
+            # vae
+            state = torch.tensor(preprocess(obs)) # (1, 3, 64, 64)
+            state = state.type(torch.FloatTensor).cuda()
+            z = self.vae.encode(state) # (1, 32)
 
-        # vae
-        state = torch.tensor(preprocess(obs)) # (1, 3, 64, 64)
-        state = state.type(torch.FloatTensor).cuda()
-        z = self.vae.encode(state) # (1, 32)
+            # rnn
+            a = torch.tensor(last_action)
+            a = a.type(torch.FloatTensor).cuda()
+            rnn_input = torch.cat((z, a), dim=1) # (1, 35)
+            self.rnn(rnn_input)
+            
+            # controller
+            c_input = torch.cat((z, self.rnn.h), dim=1) # (1, 288)
+            c_input = c_input.detach()
 
-        # rnn
-        a = torch.tensor(last_action)
-        a = a.type(torch.FloatTensor).cuda()
-        rnn_input = torch.cat((z, a), dim=1) # (1, 35)
-        z_pred = self.rnn(rnn_input) # (1, 32)
-        
-        # controller
-        c_input = torch.cat((z, self.rnn.h), dim=1) # (1, 288)
-        c_input = c_input.detach()
-
+        del state, z, a, rnn_input
         return c_input
 
     def forward(
@@ -91,6 +92,7 @@ class MyPolicy(TanhGaussianPolicy):
             return_log_prob=return_log_prob
         )
 
+        torch.cuda.empty_cache()
         return rets + (c_input,)
     
 

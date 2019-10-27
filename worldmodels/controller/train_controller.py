@@ -86,8 +86,8 @@ if __name__ == "__main__":
         version="normal",
         replay_buffer_size=int(1E6),
         algorithm_kwargs=dict(
-            num_epochs=10,
-            num_eval_steps_per_epoch=5000,
+            num_epochs=1000,
+            num_eval_steps_per_epoch=2000,
             num_trains_per_train_loop=1000,
             num_expl_steps_per_train_loop=1000,
             min_num_steps_before_training=1000,
