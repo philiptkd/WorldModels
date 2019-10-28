@@ -1,0 +1,7 @@
+cma
+argparse
+gym[box2d]
+tqdm
+numpy
+torch
+torchvision
