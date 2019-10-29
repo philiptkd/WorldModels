@@ -114,7 +114,7 @@ for p_index in range(num_workers):
 ################################################################################
 #                           Evaluation                                         #
 ################################################################################
-def evaluate(solutions, results, rollouts=100):
+def evaluate(solutions, results, rollouts=32):
     """ Give current controller evaluation.
 
     Evaluation is minus the cumulated reward averaged over rollout runs.
