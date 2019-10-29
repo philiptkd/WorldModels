@@ -1,6 +1,0 @@
-Install by running "pip install -e ." in the top-level directory.
-
-Collect random rollouts by running get_experience.py.
-Train the VAE on these rollouts by running train_vae.py from the vae/ directory.
-Prepare for RNN training by running pre_encode.py from the vae/ directory.
-Train the RNN by running train_dynamics_model.py from the dynamics_model/ directory.
