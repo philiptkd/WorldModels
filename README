@@ -1,0 +1,2 @@
+python data/generation_script.py --rollouts 1000 --rootdir datasets/boxcarry --threads 8
+python trainvae.py --logdir log_dir
