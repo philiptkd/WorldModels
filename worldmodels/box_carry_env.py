@@ -17,6 +17,12 @@ class BoxCarryEnv(gym.Env):
 
     metadata = {'render.modes': ['human', 'rgb_array']}
     
+    num_agents = 2
+    assert num_agents <= 4 # max one agent per box side
+    agents_start = [[0,i] for i in range(num_agents)] # arbitrary
+    
+    action_space = spaces.Discrete(7) # 4 cardinal directions, grab, release, and no-op
+
     def __init__(self, field_size=96, agent_size=16, mode="rgb_array"):
         if mode == "human":
             import contextlib
@@ -29,20 +35,15 @@ class BoxCarryEnv(gym.Env):
         self.agent_size = agent_size
         self.grid_size = int(field_size/agent_size)
         
+        # arbitrary
+        self.box_start = [self.grid_size//2, self.grid_size//2]
+        self.box_goal = [self.grid_size-1, self.grid_size-1]
+
         self.mode = mode
         if mode=="human":
             pygame.display.init()
             self.surface = pygame.display.set_mode([field_size, field_size])
 
-        self.num_agents = 2
-        assert self.num_agents <= 4 # max one agent per box side
-
-        # arbitrary fixed start, goal, and box positions
-        self.agents_start = [[0,i] for i in range(self.num_agents)]
-        self.box_start = [self.grid_size//2, self.grid_size//2]
-        self.box_goal = [self.grid_size-1, self.grid_size-1]
-        
-        self.action_space = spaces.Discrete(7) # 4 cardinal directions, grab, release, and no-op
         self.observation_space = spaces.Box(low=0, high=255, shape=(self.field_size, self.field_size, 3), dtype=np.uint8)
 
         channel = np.ones((self.agent_size, self.agent_size), dtype=np.uint8)
@@ -54,7 +55,11 @@ class BoxCarryEnv(gym.Env):
 
 
     def step(self, actions):
-        assert len(actions) == self.num_agents and all([self.action_space.contains(action) for action in actions])
+        try:
+            assert len(actions) == BoxCarryEnv.num_agents and all([BoxCarryEnv.action_space.contains(action) for action in actions])
+        except AssertionError:
+            print(actions)
+            raise AssertionError
 
         # box can only be moved by all agents
         if all([grabbing == 1 for grabbing in self.agents_grabbing]):
@@ -63,7 +68,7 @@ class BoxCarryEnv(gym.Env):
             
             for i, action in enumerate(actions):
                 new_positions[i] = self.agent_step(i, actions[i])
-                box_delta += (new_positions[i] - self.agents_pos[i])/self.num_agents
+                box_delta += (new_positions[i] - self.agents_pos[i])/BoxCarryEnv.num_agents
 
             if all(box_delta.astype(int) == box_delta): # if the box was moved in the same direction by all agents
                 new_box_pos = self.box_pos + box_delta.astype(np.int32)
@@ -73,7 +78,7 @@ class BoxCarryEnv(gym.Env):
 
         else:
             grabbers = [i for (i,x) in enumerate(self.agents_grabbing) if x == 1]
-            non_grabbers = [i for i in range(self.num_agents) if i not in grabbers]
+            non_grabbers = [i for i in range(BoxCarryEnv.num_agents) if i not in grabbers]
 
             # agents grabbing the box will not move, but they might still release
             for agent in grabbers:
@@ -137,7 +142,7 @@ class BoxCarryEnv(gym.Env):
 
     # is new position occupied by annother agent
     def is_occupied(self, pos, agent):
-        return any([i != agent and all(self.agents_pos[i] == pos) for i in range(self.num_agents)]) 
+        return any([i != agent and all(self.agents_pos[i] == pos) for i in range(BoxCarryEnv.num_agents)]) 
 
     # is new position blocked by un-grabbed box
     def is_blocked(self, pos, agent):
@@ -148,9 +153,9 @@ class BoxCarryEnv(gym.Env):
 
 
     def reset(self):
-        self.agents_pos = np.array(self.agents_start)
+        self.agents_pos = np.array(BoxCarryEnv.agents_start)
         self.box_pos = np.array(self.box_start)
-        self.agents_grabbing = [0]*self.num_agents
+        self.agents_grabbing = [0]*BoxCarryEnv.num_agents
         return self.render()
         
 

@@ -6,10 +6,7 @@ from torchvision import transforms
 import numpy as np
 from models import MDRNNCell, VAE, Controller
 import gym
-import gym.envs.box2d
-
-# A bit dirty: manually change size of car racing env
-gym.envs.box2d.car_racing.STATE_W, gym.envs.box2d.car_racing.STATE_H = 64, 64
+import worldmodels
 
 # Hardcoded for now
 # action_size, latent_size, rnn_size, vae_in_size, 
@@ -138,7 +135,7 @@ class RolloutGenerator(object):
                 ctrl_state['reward']))
             self.controller.load_state_dict(ctrl_state['state_dict'])
 
-        self.env = gym.make('CarRacing-v0')
+        self.env = gym.make('BoxCarry-v0')
         self.device = device
 
         self.time_limit = time_limit
@@ -160,7 +157,7 @@ class RolloutGenerator(object):
         _, latent_mu, _ = self.vae(obs)
         action = self.controller(latent_mu, hidden[0])
         _, _, _, _, _, next_hidden = self.mdrnn(action, latent_mu, hidden)
-        return action.squeeze().cpu().numpy(), next_hidden
+        return action.squeeze().cpu().numpy().astype(int).tolist(), next_hidden
 
     def rollout(self, params, render=False):
         """ Execute a rollout and returns minus cumulative reward.
@@ -179,7 +176,7 @@ class RolloutGenerator(object):
         obs = self.env.reset()
 
         # This first render is required !
-        self.env.render()
+        self.env.render("rgb_array")
 
         hidden = [
             torch.zeros(1, RSIZE).to(self.device)
@@ -189,11 +186,11 @@ class RolloutGenerator(object):
         i = 0
         while True:
             obs = transform(obs).unsqueeze(0).to(self.device)
-            action, hidden = self.get_action_and_transition(obs, hidden)
-            obs, reward, done, _ = self.env.step(action)
+            actions, hidden = self.get_action_and_transition(obs, hidden)
+            obs, reward, done, _ = self.env.step(actions)
 
             if render:
-                self.env.render()
+                self.env.render("rgb_array")
 
             cumulative += reward
             if done or i > self.time_limit:

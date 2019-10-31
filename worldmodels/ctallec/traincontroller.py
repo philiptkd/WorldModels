@@ -81,6 +81,7 @@ def slave_routine(p_queue, r_queue, e_queue, p_index):
     :args e_queue: as soon as not empty, terminate
     :args p_index: the process index
     """
+
     # init routine
     gpu = p_index % torch.cuda.device_count()
     device = torch.device('cuda:{}'.format(gpu) if torch.cuda.is_available() else 'cpu')
@@ -88,7 +89,7 @@ def slave_routine(p_queue, r_queue, e_queue, p_index):
     # redirect streams
     sys.stdout = open(join(tmp_dir, str(getpid()) + '.out'), 'a')
     sys.stderr = open(join(tmp_dir, str(getpid()) + '.err'), 'a')
-
+    
     with torch.no_grad():
         r_gen = RolloutGenerator(args.logdir, device, time_limit)
 
@@ -103,6 +104,7 @@ def slave_routine(p_queue, r_queue, e_queue, p_index):
 ################################################################################
 #                Define queues and start workers                               #
 ################################################################################
+
 p_queue = Queue()
 r_queue = Queue()
 e_queue = Queue()
