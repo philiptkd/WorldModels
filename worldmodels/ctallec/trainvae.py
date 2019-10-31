@@ -44,17 +44,12 @@ device = torch.device("cuda" if cuda else "cpu")
 
 transform_train = transforms.Compose([
     transforms.ToPILImage(),
-    transforms.Resize((RED_SIZE, RED_SIZE)),
     transforms.RandomHorizontalFlip(),
     transforms.RandomVerticalFlip(),
     transforms.ToTensor(),
 ])
 
-transform_test = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.Resize((RED_SIZE, RED_SIZE)),
-    transforms.ToTensor(),
-])
+transform_test = transforms.ToTensor()
 
 dataset_train = RolloutObservationDataset('datasets/boxcarry',
                                           transform_train, train=True)

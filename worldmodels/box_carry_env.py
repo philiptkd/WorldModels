@@ -151,6 +151,7 @@ class BoxCarryEnv(gym.Env):
         self.agents_pos = np.array(self.agents_start)
         self.box_pos = np.array(self.box_start)
         self.agents_grabbing = [0]*self.num_agents
+        return self.render()
         
 
     def insert_square(self, arr, pos, color):
@@ -179,8 +180,8 @@ class BoxCarryEnv(gym.Env):
         self.insert_square(arr, self.box_pos, "red")
 
         if mode == 'rgb_array':
-            return arr
-                
+            return arr    
+
         elif mode == 'human':
             pygame.surfarray.blit_array(self.surface, arr)
             pygame.display.flip()

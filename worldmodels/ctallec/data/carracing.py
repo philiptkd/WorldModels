@@ -7,8 +7,18 @@ from os.path import join, exists
 import gym
 import numpy as np
 import worldmodels
+from torchvision import transforms
+RED_SIZE = 64
 
-def generate_data(rollouts, data_dir, noise_type): # pylint: disable=R0914
+def resize(observations):
+    transform = transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize((RED_SIZE, RED_SIZE)),
+        transforms.Lambda(lambda x: np.array(x))
+    ])
+    return np.stack([transform(obs) for obs in observations])
+
+def generate_data(rollouts, data_dir): # pylint: disable=R0914
     """ Generates data """
     assert exists(data_dir), "The data directory does not exist..."
 
@@ -17,7 +27,7 @@ def generate_data(rollouts, data_dir, noise_type): # pylint: disable=R0914
 
     for i in range(rollouts):
         env.reset()
-        a_rollout = [[env.action_space.sample() for _ in range(env.num_agents)] for _ in range(seq_len+1)]
+        a_rollout = [[env.action_space.sample() for _ in range(env.num_agents)] for _ in range(seq_len)]
 
         s_rollout = []
         r_rollout = []
@@ -37,7 +47,7 @@ def generate_data(rollouts, data_dir, noise_type): # pylint: disable=R0914
             if done:
                 print("> End of rollout {}, {} frames...".format(i, len(s_rollout)))
                 np.savez(join(data_dir, 'rollout_{}'.format(i)),
-                         observations=np.array(s_rollout),
+                         observations=resize(np.array(s_rollout)),
                          rewards=np.array(r_rollout),
                          actions=np.array(a_rollout),
                          terminals=np.array(d_rollout))
@@ -47,8 +57,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--rollouts', type=int, help="Number of rollouts")
     parser.add_argument('--dir', type=str, help="Where to place rollouts")
-    parser.add_argument('--policy', type=str, choices=['white', 'brown'],
-                        help='Noise type used for action sampling.',
-                        default='brown')
     args = parser.parse_args()
-    generate_data(args.rollouts, args.dir, args.policy)
+    generate_data(args.rollouts, args.dir)

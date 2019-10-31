@@ -1,4 +1,5 @@
 """ Recurrent model training """
+import pdb
 import argparse
 from functools import partial
 from os.path import join, exists
@@ -72,8 +73,8 @@ if exists(rnn_file) and not args.noreload:
 
 
 # Data Loading
-transform = transforms.Lambda(
-    lambda x: np.transpose(x, (0, 3, 1, 2)) / 255)
+transform = transforms.Lambda(lambda x: np.transpose(x, (0, 3, 1, 2))/255)
+
 train_loader = DataLoader(
     RolloutSequenceDataset('datasets/boxcarry', SEQ_LEN, transform, buffer_size=30),
     batch_size=BSIZE, num_workers=8, shuffle=True)
@@ -91,6 +92,7 @@ def to_latent(obs, next_obs):
         - latent_obs: 4D torch tensor (BSIZE, SEQ_LEN, LSIZE)
         - next_latent_obs: 4D torch tensor (BSIZE, SEQ_LEN, LSIZE)
     """
+    
     with torch.no_grad():
         obs, next_obs = [
             f.upsample(x.view(-1, 3, SIZE, SIZE), size=RED_SIZE,
@@ -101,9 +103,10 @@ def to_latent(obs, next_obs):
             vae(x)[1:] for x in (obs, next_obs)]
 
         latent_obs, latent_next_obs = [
-            (x_mu + x_logsigma.exp() * torch.randn_like(x_mu)).view(BSIZE, SEQ_LEN, LSIZE)
+            (x_mu + x_logsigma.exp() * torch.randn_like(x_mu)).view(-1, SEQ_LEN, LSIZE)
             for x_mu, x_logsigma in
             [(obs_mu, obs_logsigma), (next_obs_mu, next_obs_logsigma)]]
+
     return latent_obs, latent_next_obs
 
 def get_loss(latent_obs, action, reward, terminal,
@@ -131,8 +134,11 @@ def get_loss(latent_obs, action, reward, terminal,
                            for arr in [latent_obs, action,
                                        reward, terminal,
                                        latent_next_obs]]
+
+
     mus, sigmas, logpi, rs, ds = mdrnn(action, latent_obs)
     gmm = gmm_loss(latent_next_obs, mus, sigmas, logpi)
+
     bce = f.binary_cross_entropy_with_logits(ds, terminal)
     if include_reward:
         mse = f.mse_loss(rs, reward)
@@ -164,6 +170,8 @@ def data_pass(epoch, train, include_reward): # pylint: disable=too-many-locals
     for i, data in enumerate(loader):
         obs, action, reward, terminal, next_obs = [arr.to(device) for arr in data]
 
+        actual_batch_size = obs.shape[0]
+
         # transform obs
         latent_obs, latent_next_obs = to_latent(obs, next_obs)
 
@@ -185,13 +193,14 @@ def data_pass(epoch, train, include_reward): # pylint: disable=too-many-locals
         cum_mse += losses['mse'].item() if hasattr(losses['mse'], 'item') else \
             losses['mse']
 
+
         pbar.set_postfix_str("loss={loss:10.6f} bce={bce:10.6f} "
                              "gmm={gmm:10.6f} mse={mse:10.6f}".format(
                                  loss=cum_loss / (i + 1), bce=cum_bce / (i + 1),
                                  gmm=cum_gmm / LSIZE / (i + 1), mse=cum_mse / (i + 1)))
-        pbar.update(BSIZE)
+        pbar.update(actual_batch_size)
     pbar.close()
-    return cum_loss * BSIZE / len(loader.dataset)
+    return cum_loss * actual_batch_size/ len(loader.dataset)
 
 
 train = partial(data_pass, train=True, include_reward=args.include_reward)
