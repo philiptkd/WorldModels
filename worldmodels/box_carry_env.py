@@ -3,6 +3,7 @@
 
 import gym
 from gym import spaces
+from gym.utils import seeding
 import numpy as np
 import time
 
@@ -24,6 +25,8 @@ class BoxCarryEnv(gym.Env):
     action_space = spaces.Discrete(7) # 4 cardinal directions, grab, release, and no-op
 
     def __init__(self, field_size=96, agent_size=16, mode="rgb_array"):
+        self.seed()
+        
         if mode == "human":
             import contextlib
             with contextlib.redirect_stdout(None): # removes welcome message
@@ -53,6 +56,10 @@ class BoxCarryEnv(gym.Env):
 
         self.reset()
 
+
+    def seed(self, seed=None):
+        self.np_random, seed = seeding.np_random(seed)
+        return [seed]
 
     def step(self, actions):
         try:
