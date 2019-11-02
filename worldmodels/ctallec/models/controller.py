@@ -1,24 +1,21 @@
-""" Define controller """
 import torch
 import torch.nn as nn
 from worldmodels.box_carry_env import BoxCarryEnv
 
 class Controller(nn.Module):
-    """ Controller """
-    def __init__(self, latents, recurrents, actions):
+    def __init__(self, latent_size, rnn_size, num_agents):
         super().__init__()
-        self.c1 = nn.Sequential(
-                nn.Linear(latents + recurrents, BoxCarryEnv.action_space.n),
-                nn.Softmax(dim=-1)
-                )
+      
+        self.actors = nn.ModuleList()
+        for _ in range(num_agents):
+            self.actors.append(nn.Linear(latent_size + rnn_size, BoxCarryEnv.action_space.n))
+        self.softmax = nn.Softmax(dim=-1)
 
-        self.c2 = nn.Sequential(
-                nn.Linear(latents + recurrents, BoxCarryEnv.action_space.n),
-                nn.Softmax(dim=-1)
-                )
+        self.critic = nn.Linear(latent_size + rnn_size, 1)
 
-    def forward(self, *inputs):
-        cat_in = torch.cat(inputs, dim=1)
-        logits = [self.c1(cat_in), self.c2(cat_in)]
-        actions = torch.cat([torch.multinomial(x,1) for x in logits], dim=1).float()
-        return actions
+    def forward(self, vae_latents, rnn_hiddens):
+        x = torch.cat([vae_latents, rnn_hiddens], dim=1)
+        action_probs = [self.softmax(actor(x)) for actor in self.actors]
+        state_values = self.critic(x)
+
+        return action_probs, state_values

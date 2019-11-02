@@ -21,7 +21,7 @@ from models.vae import VAE
 from models.mdrnn import MDRNN, gmm_loss
 
 parser = argparse.ArgumentParser("MDRNN training")
-parser.add_argument('--logdir', type=str,
+parser.add_argument('--logdir', type=str, default="log_dir",
                     help="Where things are logged and models are loaded from.")
 parser.add_argument('--noreload', action='store_true',
                     help="Do not reload if specified.")

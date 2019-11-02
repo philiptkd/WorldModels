@@ -24,7 +24,8 @@ parser.add_argument('--batch-size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--epochs', type=int, default=1000, metavar='N',
                     help='number of epochs to train (default: 1000)')
-parser.add_argument('--logdir', type=str, help='Directory where results are logged')
+parser.add_argument('--logdir', type=str, default="log_dir",
+                    help='Directory where results are logged')
 parser.add_argument('--noreload', action='store_true',
                     help='Best model is not reloaded if specified')
 parser.add_argument('--nosamples', action='store_true',
