@@ -4,7 +4,7 @@ from torch.distributions import Categorical
 from collections import namedtuple
 import torch
 
-SavedActions = namedtuple('SavedActions', ['log_probs', 'value'])
+SavedActions = namedtuple('SavedActions', ['log_probs', 'value', 'entropy'])
 
 class BigModel(RolloutGenerator):
     def __init__(self, mdir, device, time_limit):
@@ -22,12 +22,13 @@ class BigModel(RolloutGenerator):
        
         # get actions
         probs, state_value = self.controller(latent_mu, hidden[0])
-        dists = [Categorical(p) for p in probs]
+        dists = [Categorical(p) for p in probs] # distribution over actions for each agent
         actions = [dist.sample() for dist in dists]
         
-        # save log probs
+        # save log probs and average entropy
         log_probs = [dist.log_prob(action) for dist, action in zip(dists, actions)]
-        self.saved_actions.append(SavedActions(log_probs, state_value))
+        avg_entropy = sum([dist.entropy() for dist in dists])/len(dists)
+        self.saved_actions.append(SavedActions(log_probs, state_value, avg_entropy))
 
         # get next hidden state
         with torch.no_grad():

@@ -62,11 +62,7 @@ class BoxCarryEnv(gym.Env):
         return [seed]
 
     def step(self, actions):
-        try:
-            assert len(actions) == BoxCarryEnv.num_agents and all([BoxCarryEnv.action_space.contains(action) for action in actions])
-        except AssertionError:
-            print(actions)
-            raise AssertionError
+        assert len(actions) == BoxCarryEnv.num_agents and all([BoxCarryEnv.action_space.contains(action) for action in actions])
 
         # box can only be moved by all agents
         if all([grabbing == 1 for grabbing in self.agents_grabbing]):
@@ -87,24 +83,10 @@ class BoxCarryEnv(gym.Env):
             grabbers = [i for (i,x) in enumerate(self.agents_grabbing) if x == 1]
             non_grabbers = [i for i in range(BoxCarryEnv.num_agents) if i not in grabbers]
 
-            new_positions = self.agents_pos.copy() #TODO: remove
-            box_delta = np.array([0., 0.]) #TODO: remove
-
             # agents grabbing the box will not move, but they might still release
-            for i in grabbers:
-                #self.agent_step(agent, actions[agent]) #TODO: uncomment
+            for agent in grabbers:
+                self.agent_step(agent, actions[agent])
     
-                #TODO: remove. this all makes the environment easier by allowing single agents to move the box
-                #####################################################################
-                new_positions[i] = self.agent_step(i, actions[i])
-                box_delta += new_positions[i] - self.agents_pos[i]
-                new_box_pos = self.box_pos + box_delta.astype(np.int32)
-                if self.is_in_bounds(new_box_pos):
-                    self.box_pos = new_box_pos
-                    self.agents_pos = new_positions
-                #####################################################################
-                
-
             # non-grabbing agents can potentially move
             # arbiitrary ordering determines collision resolution
             for agent in non_grabbers:

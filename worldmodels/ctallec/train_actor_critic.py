@@ -57,6 +57,7 @@ def finish_episode():
     saved_actions = big_model.saved_actions
     policy_losses = []
     value_losses = []
+    entropies = []
     returns = []
 
     for r in big_model.rewards[::-1]:
@@ -66,14 +67,15 @@ def finish_episode():
     returns = torch.tensor(returns)
     returns = (returns - returns.mean()) / (returns.std() + eps)
 
-    for (log_probs, value), R in zip(saved_actions, returns):
+    for (log_probs, value, entropy), R in zip(saved_actions, returns):
         advantage = R - value.item()
         policy_losses += [-log_prob * advantage for log_prob in log_probs] # add all agents' policy losses
         value_losses.append(F.smooth_l1_loss(value, torch.tensor([[R]], device=device)))
+        entropies.append(entropy)
 
     # backprop
     optimizer.zero_grad()
-    loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum()
+    loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum() - torch.stack(entropies).sum()
     loss.backward()
     optimizer.step()
 

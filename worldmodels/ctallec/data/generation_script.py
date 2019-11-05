@@ -8,9 +8,9 @@ from multiprocessing import Pool
 from subprocess import call
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--rollouts', type=int, help="Total number of rollouts.")
-parser.add_argument('--threads', type=int, help="Number of threads")
-parser.add_argument('--rootdir', type=str, help="Directory to store rollout "
+parser.add_argument('--rollouts', type=int, default=1000, help="Total number of rollouts.")
+parser.add_argument('--threads', type=int, default=8, help="Number of threads")
+parser.add_argument('--rootdir', type=str, default="datasets/boxcarry", help="Directory to store rollout "
                     "directories of each thread")
 args = parser.parse_args()
 
