@@ -7,11 +7,12 @@ import numpy as np
 from models import MDRNNCell, VAE, Controller
 import gym
 import worldmodels
+from worldmodels.box_carry_env import BoxCarryEnv
 
 # Hardcoded for now
 # action_size, latent_size, rnn_size, vae_in_size, 
 ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
-    2, 32, 256, 64, 64
+    BoxCarryEnv.num_agents, 32, 256, 64, 64
 
 # Same
 transform = transforms.Compose([
