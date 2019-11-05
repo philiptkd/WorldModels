@@ -6,6 +6,10 @@ from gym import spaces
 from gym.utils import seeding
 import numpy as np
 import time
+import contextlib
+with contextlib.redirect_stdout(None): # removes welcome message
+    import pygame
+
 
 class BoxCarryEnv(gym.Env):
     LEFT = 0
@@ -26,11 +30,6 @@ class BoxCarryEnv(gym.Env):
 
     def __init__(self, field_size=96, agent_size=32, mode="rgb_array"):
         self.seed()
-        
-        if mode == "human":
-            import contextlib
-            with contextlib.redirect_stdout(None): # removes welcome message
-                import pygame
 
         assert field_size % agent_size == 0
 
@@ -194,6 +193,7 @@ class BoxCarryEnv(gym.Env):
             pygame.surfarray.blit_array(self.surface, arr)
             pygame.display.flip()
             time.sleep(.001)
+            return arr
             
         else:
             super(MyEnv, self).render(mode=mode) # just raise an exception

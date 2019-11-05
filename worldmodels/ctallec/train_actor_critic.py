@@ -42,8 +42,9 @@ env = gym.make('BoxCarry-v0')
 env.seed(args.seed)
 torch.manual_seed(args.seed)
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-time_limit = 10000
+gpu_num = np.random.randint(0,torch.cuda.device_count())
+device = torch.device("cuda:"+str(gpu_num) if torch.cuda.is_available() else "cpu")
+time_limit = 100
 
 big_model = BigModel(args.logdir, device, time_limit)
 optimizer = optim.Adam(big_model.controller.parameters(), lr=3e-2)
@@ -85,7 +86,9 @@ def finish_episode():
 
 
 def train():
+    best = -np.inf
     avg_ep_reward = 0
+    ep_rewards = []
 
     # run inifinitely many episodes
     for i_episode in count(1):
@@ -109,7 +112,8 @@ def train():
 
             big_model.rewards.append(reward)
             ep_reward += reward
-            
+            ep_rewards.append(ep_reward)
+
             if done:
                 break
 
@@ -122,12 +126,19 @@ def train():
         if i_episode % args.log_interval == 0:
             print('Episode {}\tLast reward: {:.2f}\tAverage reward: {:.2f}'.format(
                   i_episode, ep_reward, avg_ep_reward))
+            
+            with open(join(ctrl_dir, "reward_hist.npy"), "wb+") as f:
+                np.save(f, ep_rewards)
 
+        # save state
+        if avg_ep_reward > best:
+            best = avg_ep_reward
             torch.save(
                 {'episode': i_episode,
                  'reward': avg_ep_reward,
                  'state_dict': big_model.controller.state_dict()},
                 join(ctrl_dir, 'latest.tar'))
+
 
 
 if __name__ == '__main__':
