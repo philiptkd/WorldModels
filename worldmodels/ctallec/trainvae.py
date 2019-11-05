@@ -28,8 +28,8 @@ parser.add_argument('--logdir', type=str, default="log_dir",
                     help='Directory where results are logged')
 parser.add_argument('--noreload', action='store_true',
                     help='Best model is not reloaded if specified')
-parser.add_argument('--nosamples', action='store_true',
-                    help='Does not save samples during training if specified')
+parser.add_argument('--nosamples', action='store_false',
+                    help='Saves samples during training if specified')
 
 
 args = parser.parse_args()
