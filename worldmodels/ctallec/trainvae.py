@@ -30,6 +30,8 @@ parser.add_argument('--noreload', action='store_true',
                     help='Best model is not reloaded if specified')
 parser.add_argument('--nosamples', action='store_false',
                     help='Saves samples during training if specified')
+parser.add_argument('--datadir', type=str, default="datasets/boxcarry",
+                    help='Location of rollout data.')
 
 
 args = parser.parse_args()
@@ -52,9 +54,9 @@ transform_train = transforms.Compose([
 
 transform_test = transforms.ToTensor()
 
-dataset_train = RolloutObservationDataset('datasets/boxcarry',
+dataset_train = RolloutObservationDataset(args.datadir,
                                           transform_train, train=True)
-dataset_test = RolloutObservationDataset('datasets/boxcarry',
+dataset_test = RolloutObservationDataset(args.datadir,
                                          transform_test, train=False)
 train_loader = torch.utils.data.DataLoader(
     dataset_train, batch_size=args.batch_size, shuffle=True, num_workers=2)

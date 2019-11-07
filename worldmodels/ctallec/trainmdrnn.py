@@ -27,6 +27,8 @@ parser.add_argument('--noreload', action='store_true',
                     help="Do not reload if specified.")
 parser.add_argument('--include_reward', action='store_true',
                     help="Add a reward modelisation term to the loss.")
+parser.add_argument('--datadir', type=str, default="datasets/boxcarry",
+                    help='Location of rollout data.')
 args = parser.parse_args()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -76,10 +78,10 @@ if exists(rnn_file) and not args.noreload:
 transform = transforms.Lambda(lambda x: np.transpose(x, (0, 3, 1, 2))/255)
 
 train_loader = DataLoader(
-    RolloutSequenceDataset('datasets/boxcarry', SEQ_LEN, transform, buffer_size=30),
+    RolloutSequenceDataset(args.datadir, SEQ_LEN, transform, buffer_size=30),
     batch_size=BSIZE, num_workers=8, shuffle=True)
 test_loader = DataLoader(
-    RolloutSequenceDataset('datasets/boxcarry', SEQ_LEN, transform, train=False, buffer_size=10),
+    RolloutSequenceDataset(args.datadir, SEQ_LEN, transform, train=False, buffer_size=10),
     batch_size=BSIZE, num_workers=8)
 
 def to_latent(obs, next_obs):
@@ -128,13 +130,8 @@ def get_loss(latent_obs, action, reward, terminal,
     :returns: dictionary of losses, containing the gmm, the mse, the bce and
         the averaged loss.
     """
-    latent_obs, action,\
-        reward, terminal,\
-        latent_next_obs = [arr.transpose(1, 0)
-                           for arr in [latent_obs, action,
-                                       reward, terminal,
-                                       latent_next_obs]]
-
+    latent_obs, action, reward, terminal, latent_next_obs = \
+            [arr.transpose(1, 0) for arr in [latent_obs, action, reward, terminal, latent_next_obs]]
 
     mus, sigmas, logpi, rs, ds = mdrnn(action, latent_obs)
     gmm = gmm_loss(latent_next_obs, mus, sigmas, logpi)
