@@ -22,7 +22,7 @@ class BoxCarryEnv(gym.Env):
 
     metadata = {'render.modes': ['human', 'rgb_array']}
     
-    num_agents = 1
+    num_agents = 2
     assert num_agents <= 4 # max one agent per box side
     agents_start = [[0,i] for i in range(num_agents)] # arbitrary
     
