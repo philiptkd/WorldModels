@@ -4,7 +4,9 @@ from os.path import join, exists
 import torch
 from torchvision import transforms
 import numpy as np
-from models import MDRNNCell, VAE, Controller
+from models import VAE, Controller
+from worldmodels.vrnn import VRNNCell
+
 import gym
 import worldmodels
 from worldmodels.box_carry_env import BoxCarryEnv
@@ -57,8 +59,8 @@ class RolloutGenerator(object):
         self.vae = VAE(3, LSIZE).to(device)
         self.vae.load_state_dict(vae_state['state_dict'])
 
-        self.mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
-        self.mdrnn.load_state_dict(
+        self.vrnn = VRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
+        self.vrnn.load_state_dict(
             {k.strip('_l0'): v for k, v in rnn_state['state_dict'].items()})
 
         self.controller = Controller(LSIZE, RSIZE, ASIZE).to(device)
@@ -91,7 +93,7 @@ class RolloutGenerator(object):
         """
         _, latent_mu, _ = self.vae(obs)
         action = self.controller(latent_mu, hidden[0])
-        _, _, _, _, _, next_hidden = self.mdrnn(action, latent_mu, hidden)
+        _, _, _, _, _, next_hidden = self.vrnn(action, latent_mu, hidden)
         return action.squeeze().cpu().numpy().astype(int).tolist(), next_hidden
 
     def rollout(self, params, render=False):

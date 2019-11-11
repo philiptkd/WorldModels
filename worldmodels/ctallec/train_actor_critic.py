@@ -97,7 +97,7 @@ def train():
         obs = env.reset()
         ep_reward = 0
         rnn_hidden = [
-            torch.zeros(1, RSIZE).to(device)
+            torch.zeros(1, RSIZE*2).to(device)
             for _ in range(2)]
 
         # for each episode, only run 9999 steps so that we don't 

@@ -1,4 +1,4 @@
-from worldmodels.ctallec.models import MDRNNCell, VAE, Controller
+from worldmodels.vrnn import VRNNCell, reparameterize
 from worldmodels.ctallec.utils.misc import RolloutGenerator
 from torch.distributions import Categorical
 from collections import namedtuple
@@ -21,7 +21,7 @@ class BigModel(RolloutGenerator):
             _, latent_mu, _ = self.vae(obs)
        
         # get actions
-        probs, state_value = self.controller(latent_mu, hidden[0])
+        probs, state_value = self.controller(latent_mu, reparameterize(hidden[0]))
         dists = [Categorical(p) for p in probs] # distribution over actions for each agent
         actions = [dist.sample() for dist in dists]
         
@@ -32,7 +32,7 @@ class BigModel(RolloutGenerator):
 
         # get next hidden state
         with torch.no_grad():
-            _, _, _, _, _, next_hidden = self.mdrnn(torch.cat(actions).float().unsqueeze(0), latent_mu, hidden)
+            _, _, _, _, _, next_hidden = self.vrnn(torch.cat(actions).float().unsqueeze(0), latent_mu, hidden)
 
         return [action.item() for action in actions], next_hidden
 

@@ -18,7 +18,8 @@ from utils.learning import ReduceLROnPlateau
 
 from data.loaders import RolloutSequenceDataset
 from models.vae import VAE
-from models.mdrnn import MDRNN, gmm_loss
+from models.mdrnn import gmm_loss
+from worldmodels.vrnn import VRNN, kl_divergence
 
 parser = argparse.ArgumentParser("MDRNN training")
 parser.add_argument('--logdir', type=str, default="log_dir",
@@ -56,9 +57,9 @@ rnn_file = join(rnn_dir, 'best.tar')
 if not exists(rnn_dir):
     mkdir(rnn_dir)
 
-mdrnn = MDRNN(LSIZE, ASIZE, RSIZE, 5)
-mdrnn.to(device)
-optimizer = torch.optim.RMSprop(mdrnn.parameters(), lr=1e-3, alpha=.9)
+vrnn = VRNN(LSIZE, ASIZE, RSIZE, 5)
+vrnn.to(device)
+optimizer = torch.optim.RMSprop(vrnn.parameters(), lr=1e-3, alpha=.9)
 scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=5)
 earlystopping = EarlyStopping('min', patience=30)
 
@@ -68,7 +69,7 @@ if exists(rnn_file) and not args.noreload:
     print("Loading MDRNN at epoch {} "
           "with test error {}".format(
               rnn_state["epoch"], rnn_state["precision"]))
-    mdrnn.load_state_dict(rnn_state["state_dict"])
+    vrnn.load_state_dict(rnn_state["state_dict"])
     optimizer.load_state_dict(rnn_state["optimizer"])
     scheduler.load_state_dict(state['scheduler'])
     earlystopping.load_state_dict(state['earlystopping'])
@@ -133,27 +134,31 @@ def get_loss(latent_obs, action, reward, terminal,
     latent_obs, action, reward, terminal, latent_next_obs = \
             [arr.transpose(1, 0) for arr in [latent_obs, action, reward, terminal, latent_next_obs]]
 
-    mus, sigmas, logpi, rs, ds = mdrnn(action, latent_obs)
+    mus, sigmas, logpi, rs, ds, next_hc = vrnn(action, latent_obs)
+
+    h_params = next_hc[0]
+    kl = kl_divergence(h_params)
+
     gmm = gmm_loss(latent_next_obs, mus, sigmas, logpi)
 
     bce = f.binary_cross_entropy_with_logits(ds, terminal)
     if include_reward:
         mse = f.mse_loss(rs, reward)
-        scale = LSIZE + 2
+        scale = LSIZE + 3
     else:
         mse = 0
-        scale = LSIZE + 1
-    loss = (gmm + bce + mse) / scale
-    return dict(gmm=gmm, bce=bce, mse=mse, loss=loss)
+        scale = LSIZE + 2
+    loss = (gmm + bce + mse + kl_loss) / scale
+    return dict(gmm=gmm, bce=bce, mse=mse, loss=loss, kl=kl)
 
 
 def data_pass(epoch, train, include_reward): # pylint: disable=too-many-locals
     """ One pass through the data """
     if train:
-        mdrnn.train()
+        vrnn.train()
         loader = train_loader
     else:
-        mdrnn.eval()
+        vrnn.eval()
         loader = test_loader
 
     loader.dataset.load_next_buffer()
@@ -162,6 +167,7 @@ def data_pass(epoch, train, include_reward): # pylint: disable=too-many-locals
     cum_gmm = 0
     cum_bce = 0
     cum_mse = 0
+    cum_kl = 0
 
     pbar = tqdm(total=len(loader.dataset), desc="Epoch {}".format(epoch))
     for i, data in enumerate(loader):
@@ -187,14 +193,15 @@ def data_pass(epoch, train, include_reward): # pylint: disable=too-many-locals
         cum_loss += losses['loss'].item()
         cum_gmm += losses['gmm'].item()
         cum_bce += losses['bce'].item()
+        cum_kl += losses['kl'].item()
         cum_mse += losses['mse'].item() if hasattr(losses['mse'], 'item') else \
             losses['mse']
 
 
         pbar.set_postfix_str("loss={loss:10.6f} bce={bce:10.6f} "
-                             "gmm={gmm:10.6f} mse={mse:10.6f}".format(
+                             "gmm={gmm:10.6f} mse={mse:10.6f} kl={kl:10.6f}".format(
                                  loss=cum_loss / (i + 1), bce=cum_bce / (i + 1),
-                                 gmm=cum_gmm / LSIZE / (i + 1), mse=cum_mse / (i + 1)))
+                                 gmm=cum_gmm / LSIZE / (i + 1), mse=cum_mse / (i + 1), kl=cum_kl / (i+1)))
         pbar.update(actual_batch_size)
     pbar.close()
     return cum_loss * actual_batch_size/ len(loader.dataset)
@@ -215,7 +222,7 @@ for e in range(epochs):
         cur_best = test_loss
     checkpoint_fname = join(rnn_dir, 'checkpoint.tar')
     save_checkpoint({
-        "state_dict": mdrnn.state_dict(),
+        "state_dict": vrnn.state_dict(),
         "optimizer": optimizer.state_dict(),
         'scheduler': scheduler.state_dict(),
         'earlystopping': earlystopping.state_dict(),
