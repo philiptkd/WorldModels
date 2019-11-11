@@ -38,6 +38,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 BSIZE = 16
 SEQ_LEN = 32
 epochs = 30
+kl_coeff = 5
 
 # Loading VAE
 vae_file = join(args.logdir, 'vae', 'best.tar')
@@ -137,7 +138,7 @@ def get_loss(latent_obs, action, reward, terminal,
     mus, sigmas, logpi, rs, ds, next_hc = vrnn(action, latent_obs)
 
     h_params = next_hc[0]
-    kl = kl_divergence(h_params)
+    kl = kl_coeff*kl_divergence(h_params)
 
     gmm = gmm_loss(latent_next_obs, mus, sigmas, logpi)
 
@@ -148,7 +149,7 @@ def get_loss(latent_obs, action, reward, terminal,
     else:
         mse = 0
         scale = LSIZE + 2
-    loss = (gmm + bce + mse + kl_loss) / scale
+    loss = (gmm + bce + mse + kl) / scale
     return dict(gmm=gmm, bce=bce, mse=mse, loss=loss, kl=kl)
 
 

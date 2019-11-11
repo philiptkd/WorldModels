@@ -2,16 +2,19 @@ from worldmodels.ctallec.models.mdrnn import _MDRNNBase
 import torch
 import torch.nn as nn
 from torch.nn import Parameter
+import torch.nn.functional as f
 
 def reparameterize(h_params):
-    mu, logvar = h_params[..., :self.hiddens], h_params[..., self.hiddens:]
+    latent_size = h_params.shape[-1]//2
+    mu, logvar = h_params[..., :latent_size], h_params[..., latent_size:]
     std = logvar.div(2).exp()
     eps = torch.randn_like(std)
     return mu + std*eps
 
 
 def kl_divergence(h_params):
-    mu, logvar = h_params[..., :self.hiddens], h_params[..., self.hiddens:]
+    latent_size = h_params.shape[-1]//2
+    mu, logvar = h_params[..., :latent_size], h_params[..., latent_size:]
     klds = -0.5*(1 + logvar - mu.pow(2) - logvar.exp())
     klds = klds.sum(-1).mean()
     return klds
