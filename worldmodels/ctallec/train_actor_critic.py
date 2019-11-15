@@ -33,6 +33,12 @@ transform = transforms.Compose([
     transforms.ToTensor()
 ])
 
+# Loading model
+rnn_dir = join(args.logdir, 'mdrnn')
+rnn_file = join(rnn_dir, 'best.tar')
+if not exists(rnn_dir):
+    mkdir(rnn_dir)
+
 # create ctrl dir if non exitent
 ctrl_dir = join(args.logdir, 'ctrl')
 if not exists(ctrl_dir):
@@ -74,15 +80,19 @@ def finish_episode():
         value_losses.append(F.smooth_l1_loss(value, torch.tensor([[R]], device=device)))
         entropies.append(entropy)
 
+    mdrnn_loss = big_model.get_mdrnn_loss(False)
+
     # backprop
     optimizer.zero_grad()
-    loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum() - torch.stack(entropies).sum()
+    loss = torch.stack(policy_losses).sum() + torch.stack(value_losses).sum() - torch.stack(entropies).sum() + mdrnn_loss['loss']
     loss.backward()
     optimizer.step()
 
     # reset rewards and action buffer
     del big_model.rewards[:]
     del big_model.saved_actions[:]
+    del big_model.rnn_loss_args[:]
+    del big_model.terminals[:]
 
 
 def train():
@@ -111,6 +121,7 @@ def train():
                 env.render()
 
             big_model.rewards.append(reward)
+            big_model.terminals.append(done)
             ep_reward += reward
             ep_rewards.append(ep_reward)
 
@@ -137,7 +148,10 @@ def train():
                 {'episode': i_episode,
                  'reward': avg_ep_reward,
                  'state_dict': big_model.controller.state_dict()},
-                join(ctrl_dir, 'latest.tar'))
+                join(ctrl_dir, 'best.tar'))
+
+            torch.save({'state_dict': big_model.mdrnn.state_dict()}, 
+                    join(rnn_dir, 'best.tar'))
 
 
 

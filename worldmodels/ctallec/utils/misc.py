@@ -39,31 +39,27 @@ class RolloutGenerator(object):
     def __init__(self, mdir, device, time_limit):
         """ Build vae, rnn, controller and environment. """
         # Loading world model and vae
-        vae_file, rnn_file, ctrl_file = \
+        vae_file, mdrnn_file, ctrl_file = \
             [join(mdir, m, 'best.tar') for m in ['vae', 'mdrnn', 'ctrl']]
 
-        assert exists(vae_file) and exists(rnn_file),\
-            "Either vae or mdrnn is untrained."
+        assert exists(vae_file), "VAE is untrained." + vae_file
 
-        vae_state, rnn_state = [
-            torch.load(fname, map_location={'cuda:0': str(device)})
-            for fname in (vae_file, rnn_file)]
-
-        for m, s in (('VAE', vae_state), ('MDRNN', rnn_state)):
-            print("Loading {} at epoch {} "
-                  "with test loss {}".format(
-                      m, s['epoch'], s['precision']))
+        vae_state = torch.load(vae_file, map_location={'cuda:0': str(device)})
+        print("Loading VAE at epoch {} with test loss {}".format(
+                  vae_state['epoch'], vae_state['precision']))
 
         self.vae = VAE(3, LSIZE).to(device)
         self.vae.load_state_dict(vae_state['state_dict'])
 
         self.mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
-        self.mdrnn.load_state_dict(
-            {k.strip('_l0'): v for k, v in rnn_state['state_dict'].items()})
-
         self.controller = Controller(LSIZE, RSIZE, ASIZE).to(device)
 
-        # load controller if it was previously saved
+        # load mdrnn and controller if they were previously saved
+        if exists(mdrnn_file):
+            mdrnn_state = torch.load(mdrnn_file, map_location={'cuda:0': str(device)})
+            print("Loading MDRNN")
+            self.mdrnn.load_state_dict(mdrnn_state['state_dict'])
+
         if exists(ctrl_file):
             ctrl_state = torch.load(ctrl_file, map_location={'cuda:0': str(device)})
             print("Loading Controller with reward {}".format(
