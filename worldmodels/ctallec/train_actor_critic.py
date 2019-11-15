@@ -53,7 +53,10 @@ device = torch.device("cuda:"+str(gpu_num) if torch.cuda.is_available() else "cp
 time_limit = 100
 
 big_model = BigModel(args.logdir, device, time_limit)
-optimizer = optim.Adam(big_model.controller.parameters(), lr=3e-2)
+optimizer = optim.Adam([
+                            {'params': big_model.controller.parameters()},
+                            {'params': big_model.mdrnn.parameters()}
+                        ])
 eps = np.finfo(np.float32).eps.item() # smallest representable number
 
 def finish_episode():
