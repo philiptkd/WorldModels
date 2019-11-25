@@ -30,6 +30,7 @@ def gmm_loss(batch, mus, sigmas, logpi, reduce=True): # pylint: disable=too-many
     NOTE: The loss is not reduced along the feature dimension (i.e. it should scale ~linearily
     with fs).
     """
+    
     batch = batch.unsqueeze(-2)
     normal_dist = Normal(mus, sigmas)
     g_log_probs = normal_dist.log_prob(batch)

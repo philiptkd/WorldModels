@@ -4,7 +4,7 @@ from os.path import join, exists
 import torch
 from torchvision import transforms
 import numpy as np
-from models import MDRNNCell, VAE, Controller
+from models import MDRNNCell, VAE, Actor, Critic
 import gym
 import worldmodels
 from worldmodels.box_carry_env import BoxCarryEnv
@@ -13,6 +13,7 @@ from worldmodels.box_carry_env import BoxCarryEnv
 # action_size, latent_size, rnn_size, vae_in_size, 
 ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
     BoxCarryEnv.num_agents, 32, 256, 64, 64
+lamb = 0.6
 
 # Same
 transform = transforms.Compose([
@@ -52,7 +53,8 @@ class RolloutGenerator(object):
         self.vae.load_state_dict(vae_state['state_dict'])
 
         self.mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
-        self.controller = Controller(LSIZE, RSIZE, ASIZE).to(device)
+        self.actor = Actor(LSIZE, RSIZE, ASIZE, lamb).to(device)
+        self.critic = Critic(LSIZE, RSIZE, lamb).to(device)
 
         # load mdrnn and controller if they were previously saved
         if exists(mdrnn_file):
@@ -64,7 +66,8 @@ class RolloutGenerator(object):
             ctrl_state = torch.load(ctrl_file, map_location={'cuda:0': str(device)})
             print("Loading Controller with reward {}".format(
                 ctrl_state['reward']))
-            self.controller.load_state_dict(ctrl_state['state_dict'])
+            self.actor.load_state_dict(ctrl_state['actor_state_dict'])
+            self.critic.load_state_dict(ctrl_state['critic_state_dict'])
 
         #self.env = gym.make('BoxCarry-v0')
         self.device = device
