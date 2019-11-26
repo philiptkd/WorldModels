@@ -52,6 +52,7 @@ gpu_num = np.random.randint(0,torch.cuda.device_count())
 device = torch.device("cuda:"+str(gpu_num) if torch.cuda.is_available() else "cpu")
 time_limit = 100
 bptt_len = 1
+target_update_period = 1000
 
 big_model = BigModel(args.logdir, device, time_limit)
 optimizer = optim.Adam([
@@ -76,6 +77,7 @@ def train():
     best = -np.inf
     avg_ep_reward = 0
     ep_rewards = []
+    total_steps = 0
 
     # run inifinitely many episodes
     for i_episode in count(1):
@@ -95,6 +97,10 @@ def train():
 
         # don't infinite loop while learning
         for t in range(time_limit):
+            # copy parameters to target network
+            if total_steps % target_update_period == 0:
+                big_model.target_critic.load_state_dict(big_model.critic.state_dict())
+
             # get action and step forward through rnn
             actions, log_probs, avg_entropy, rnn_hidden = big_model.rnn_forward(latent_mu, rnn_hidden)
 
@@ -112,7 +118,7 @@ def train():
             delta = reward - state_value
             delta *= -1 # sign change to make step in the right direction
             
-            # get actor and critic gradients with respect to current state
+            # get actor and critic gradients with respect to current state before evaluating next state
             optimizer.zero_grad()
             state_value.backward(retain_graph=True)
             for log_prob in log_probs:
@@ -124,7 +130,7 @@ def train():
 
             # update gradients due to changed delta
             if not done:
-                next_state_value = big_model.critic(latent_mu, rnn_hidden[0])
+                next_state_value = big_model.target_critic(latent_mu, rnn_hidden[0])
                 delta_delta = args.gamma*next_state_value
                 delta_delta *= -1 # sign change to make step in the right direction
                 big_model.critic._increase_delta(delta_delta)
@@ -152,7 +158,9 @@ def train():
             # prepare for next time step
             state_value = next_state_value
             discount *= args.gamma
-
+            
+            total_steps += 1
+    
         ep_rewards.append(ep_reward)
         avg_ep_reward += (ep_reward - avg_ep_reward)/i_episode
 

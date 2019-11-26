@@ -55,6 +55,8 @@ class RolloutGenerator(object):
         self.mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
         self.actor = Actor(LSIZE, RSIZE, ASIZE, lamb).to(device)
         self.critic = Critic(LSIZE, RSIZE, lamb).to(device)
+        self.target_critic = Critic(LSIZE, RSIZE, lamb).to(device)
+        self.target_critic.eval() # don't backprop through target net
 
         # load mdrnn and controller if they were previously saved
         if exists(mdrnn_file):
