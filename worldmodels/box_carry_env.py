@@ -22,10 +22,12 @@ class BoxCarryEnv(gym.Env):
 
     metadata = {'render.modes': ['human', 'rgb_array']}
     
-    num_agents = 1
+    num_agents = 2
+    num_grabbers_needed = 1
+
     assert num_agents <= 4 # max one agent per box side
     agents_start = [[0,i] for i in range(num_agents)] # arbitrary
-    
+
     action_space = spaces.Discrete(7) # 4 cardinal directions, grab, release, and no-op
 
     def __init__(self, field_size=96, agent_size=32, mode="rgb_array"):
@@ -53,7 +55,7 @@ class BoxCarryEnv(gym.Env):
         self.red_square = np.stack([channel*255, channel*0, channel*0], axis=-1)
         self.green_square = np.stack([channel*0, channel*255, channel*0], axis=-1)
 
-        self.reset()
+        self.reset(mode)
 
 
     def seed(self, seed=None):
@@ -62,41 +64,49 @@ class BoxCarryEnv(gym.Env):
 
     def step(self, actions):
         assert len(actions) == BoxCarryEnv.num_agents and all([BoxCarryEnv.action_space.contains(action) for action in actions])
+            
+        grabbers = [i for (i,x) in enumerate(self.agents_grabbing) if x == 1]
+        non_grabbers = [i for i in range(BoxCarryEnv.num_agents) if i not in grabbers]
 
-        # box can only be moved by all agents
-        if all([grabbing == 1 for grabbing in self.agents_grabbing]):
+        # if sufficient number of agents are grabbing the box
+        if len(grabbers) >= BoxCarryEnv.num_grabbers_needed:
             new_positions = self.agents_pos.copy()
             box_delta = np.array([0., 0.])
             
-            for i, action in enumerate(actions):
-                new_positions[i] = self.agent_step(i, actions[i])
-                box_delta += (new_positions[i] - self.agents_pos[i])/BoxCarryEnv.num_agents
+            for agent in grabbers:
+                new_positions[agent] = self.agent_step(agent, actions[agent])
+                box_delta += (new_positions[agent] - self.agents_pos[agent])/len(grabbers) # all grabbers must cooperate
 
-            if all(box_delta.astype(int) == box_delta): # if the box was moved in the same direction by all agents
+            # if the box was moved in the same direction by all grabbers
+            if 1 in box_delta or -1 in box_delta:
                 new_box_pos = self.box_pos + box_delta.astype(np.int32)
-                if self.is_in_bounds(new_box_pos):
+                if self.is_in_bounds(new_box_pos) and self.is_clear(new_box_pos):
                     self.box_pos = new_box_pos
                     self.agents_pos = new_positions
-
         else:
-            grabbers = [i for (i,x) in enumerate(self.agents_grabbing) if x == 1]
-            non_grabbers = [i for i in range(BoxCarryEnv.num_agents) if i not in grabbers]
-
             # agents grabbing the box will not move, but they might still release
             for agent in grabbers:
                 self.agent_step(agent, actions[agent])
-    
-            # non-grabbing agents can potentially move
-            # arbiitrary ordering determines collision resolution
-            for agent in non_grabbers:
-                self.agents_pos[agent] = self.agent_step(agent, actions[agent])
 
+        # non-grabbing agents can potentially move
+        # arbiitrary ordering determines collision resolution
+        for agent in non_grabbers:
+            self.agents_pos[agent] = self.agent_step(agent, actions[agent])
+            
         observation = self.render(mode=self.mode)
         reward = self.get_reward()
         done = all(self.box_pos == self.box_goal)
         info = {}
         
         return observation, reward, done, info
+
+
+    def is_pos_good(self):
+        for i,pos in enumerate(self.agents_pos):
+            if all(pos == self.box_pos):
+                print(pos, self.box_pos)
+                return False
+        return True
 
 
     def get_reward(self):
@@ -107,7 +117,7 @@ class BoxCarryEnv(gym.Env):
 
     # returns would-be new position if agent took action
     def agent_step(self, agent, action):
-        pos = self.agents_pos[agent].copy() # (x,y) tuple
+        pos = self.agents_pos[agent].copy()
 
         # if staying, grabbing, or releasing, no need to check if current position is valid
         if action == BoxCarryEnv.STAY:
@@ -124,9 +134,9 @@ class BoxCarryEnv(gym.Env):
         elif action == BoxCarryEnv.RIGHT:
             pos[1] += 1
         elif action == BoxCarryEnv.UP:
-            pos[0] += 1
-        elif action == BoxCarryEnv.DOWN:
             pos[0] -= 1
+        elif action == BoxCarryEnv.DOWN:
+            pos[0] += 1
             
         if self.is_valid(agent, pos):
             return pos
@@ -142,23 +152,27 @@ class BoxCarryEnv(gym.Env):
     def is_in_bounds(self, pos):
         return all([coord >= 0 and coord < self.grid_size for coord in pos]) 
 
-    # is new position occupied by annother agent
-    def is_occupied(self, pos, agent):
-        return any([i != agent and all(self.agents_pos[i] == pos) for i in range(BoxCarryEnv.num_agents)]) 
+    # is new position occupied by an agent
+    def is_occupied(self, pos):
+        return any([all(self.agents_pos[i] == pos) for i in range(BoxCarryEnv.num_agents)]) 
 
     # is new position blocked by un-grabbed box
     def is_blocked(self, pos, agent):
         return self.agents_grabbing[agent] == 0 and all(self.box_pos == pos)
 
+    # is new box position clear of non_grabbers
+    def is_clear(self, pos):
+        return not any([self.agents_grabbing[i] == 0 and all(self.agents_pos[i] == pos) for i in range(BoxCarryEnv.num_agents)]) 
+
     def is_valid(self, agent, pos):
-        return self.is_in_bounds(pos) and not self.is_occupied(pos, agent) and not self.is_blocked(pos, agent)
+        return self.is_in_bounds(pos) and not self.is_occupied(pos) and not self.is_blocked(pos, agent)
 
 
-    def reset(self):
+    def reset(self, mode):
         self.agents_pos = np.array(BoxCarryEnv.agents_start)
         self.box_pos = np.array(self.box_start)
         self.agents_grabbing = [0]*BoxCarryEnv.num_agents
-        return self.render()
+        return self.render(mode=mode)
         
 
     def insert_square(self, arr, pos, color):
