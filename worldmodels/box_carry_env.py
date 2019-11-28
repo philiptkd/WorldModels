@@ -23,7 +23,7 @@ class BoxCarryEnv(gym.Env):
     metadata = {'render.modes': ['human', 'rgb_array']}
     
     num_agents = 2
-    num_grabbers_needed = 1
+    num_grabbers_needed = 2
 
     assert num_agents <= 4 # max one agent per box side
     agents_start = [[0,i] for i in range(num_agents)] # arbitrary
@@ -44,7 +44,7 @@ class BoxCarryEnv(gym.Env):
         self.box_goal = [self.grid_size-1, self.grid_size-1]
 
         self.mode = mode
-        if mode=="human":
+        if self.mode=="human":
             pygame.display.init()
             self.surface = pygame.display.set_mode([field_size, field_size])
 
@@ -55,7 +55,7 @@ class BoxCarryEnv(gym.Env):
         self.red_square = np.stack([channel*255, channel*0, channel*0], axis=-1)
         self.green_square = np.stack([channel*0, channel*255, channel*0], axis=-1)
 
-        self.reset(mode)
+        self.reset()
 
 
     def seed(self, seed=None):
@@ -93,7 +93,7 @@ class BoxCarryEnv(gym.Env):
         for agent in non_grabbers:
             self.agents_pos[agent] = self.agent_step(agent, actions[agent])
             
-        observation = self.render(mode=self.mode)
+        observation = self.render()
         reward = self.get_reward()
         done = all(self.box_pos == self.box_goal)
         info = {}
@@ -168,11 +168,11 @@ class BoxCarryEnv(gym.Env):
         return self.is_in_bounds(pos) and not self.is_occupied(pos) and not self.is_blocked(pos, agent)
 
 
-    def reset(self, mode):
+    def reset(self):
         self.agents_pos = np.array(BoxCarryEnv.agents_start)
         self.box_pos = np.array(self.box_start)
         self.agents_grabbing = [0]*BoxCarryEnv.num_agents
-        return self.render(mode=mode)
+        return self.render()
         
 
     def insert_square(self, arr, pos, color):
@@ -187,7 +187,7 @@ class BoxCarryEnv(gym.Env):
         arr[pos[0]*scale : (pos[0]+1)*scale, pos[1]*scale : (pos[1]+1)*scale] = square
 
 
-    def render(self, mode='rgb_array'):
+    def render(self):
         arr = np.ones(self.observation_space.shape, dtype=np.uint8)*255 # white background
 
         # agents
@@ -200,17 +200,17 @@ class BoxCarryEnv(gym.Env):
         # box
         self.insert_square(arr, self.box_pos, "red")
 
-        if mode == 'rgb_array':
+        if self.mode == 'rgb_array':
             return arr    
 
-        elif mode == 'human':
+        elif self.mode == 'human':
             pygame.surfarray.blit_array(self.surface, arr)
             pygame.display.flip()
             time.sleep(.001)
             return arr
             
         else:
-            super(MyEnv, self).render(mode=mode) # just raise an exception
+            super(MyEnv, self).render() # just raise an exception
 
 
 # running this file (not importing) tests and displays

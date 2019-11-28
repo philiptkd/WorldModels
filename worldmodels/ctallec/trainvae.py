@@ -42,8 +42,8 @@ torch.manual_seed(123)
 # Fix numeric divergence due to bug in Cudnn
 torch.backends.cudnn.benchmark = True
 
-device = torch.device("cuda" if cuda else "cpu")
-
+#device = torch.device("cuda" if cuda else "cpu")
+device = torch.device("cuda:0")
 
 transform_train = transforms.Compose([
     transforms.ToPILImage(),
