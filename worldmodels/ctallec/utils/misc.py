@@ -8,12 +8,14 @@ from models import MDRNNCell, VAE, Actor, Critic
 import gym
 import worldmodels
 from worldmodels.box_carry_env import BoxCarryEnv
+from worldmodels.vrnn import VRNNCell
 
 # Hardcoded for now
 # action_size, latent_size, rnn_size, vae_in_size, 
 ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
     BoxCarryEnv.num_agents, 32, 256, 64, 64
 lamb = 0.6
+kl_coeff = 5
 
 # Same
 transform = transforms.Compose([
@@ -30,18 +32,20 @@ class RolloutGenerator(object):
     using a controller with previously trained VAE and MDRNN.
 
     :attr vae: VAE model loaded from mdir/vae
-    :attr mdrnn: MDRNN model loaded from mdir/mdrnn
+    :attr rnn: MDRNN model loaded from mdir/rnn
     :attr controller: Controller, either loaded from mdir/ctrl or randomly
         initialized
     :attr env: instance of the CarRacing-v0 gym environment
     :attr device: device used to run VAE, MDRNN and Controller
     :attr time_limit: rollouts have a maximum of time_limit timesteps
     """
-    def __init__(self, mdir, device, time_limit):
+    def __init__(self, mdir, device, time_limit, vrnn: bool):
+        self.vrnn = vrnn
+
         """ Build vae, rnn, controller and environment. """
         # Loading world model and vae
-        vae_file, mdrnn_file, ctrl_file = \
-            [join(mdir, m, 'best.tar') for m in ['vae', 'mdrnn', 'ctrl']]
+        vae_file, rnn_file, ctrl_file = \
+            [join(mdir, m, 'best.tar') for m in ['vae', 'rnn', 'ctrl']]
 
         assert exists(vae_file), "VAE is untrained." + vae_file
 
@@ -52,17 +56,21 @@ class RolloutGenerator(object):
         self.vae = VAE(3, LSIZE).to(device)
         self.vae.load_state_dict(vae_state['state_dict'])
 
-        self.mdrnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
+        if vrnn:
+            self.rnn = VRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
+        else:
+            self.rnn = MDRNNCell(LSIZE, ASIZE, RSIZE, 5).to(device)
+
         self.actor = Actor(LSIZE, RSIZE, ASIZE, lamb).to(device)
         self.critic = Critic(LSIZE, RSIZE, lamb).to(device)
         self.target_critic = Critic(LSIZE, RSIZE, lamb).to(device)
         self.target_critic.eval() # don't backprop through target net
 
-        # load mdrnn and controller if they were previously saved
-        if exists(mdrnn_file):
-            mdrnn_state = torch.load(mdrnn_file, map_location={'cuda:0': str(device)})
+        # load rnn and controller if they were previously saved
+        if exists(rnn_file):
+            rnn_state = torch.load(rnn_file, map_location={'cuda:0': str(device)})
             print("Loading MDRNN")
-            self.mdrnn.load_state_dict(mdrnn_state['state_dict'])
+            self.rnn.load_state_dict(rnn_state['state_dict'])
 
         if exists(ctrl_file):
             ctrl_state = torch.load(ctrl_file, map_location={'cuda:0': str(device)})
@@ -92,7 +100,7 @@ class RolloutGenerator(object):
         """
         _, latent_mu, _ = self.vae(obs)
         action = self.controller(latent_mu, hidden[0])
-        _, _, _, _, _, next_hidden = self.mdrnn(action, latent_mu, hidden)
+        _, _, _, _, _, next_hidden = self.rnn(action, latent_mu, hidden)
         return action.squeeze().cpu().numpy().astype(int).tolist(), next_hidden
 
     def rollout(self, params, render=False):

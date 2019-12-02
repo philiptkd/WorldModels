@@ -11,6 +11,7 @@ import torch.optim as optim
 from torchvision import transforms
 
 from worldmodels.big_model import BigModel
+from worldmodels.vrnn import reparameterize
 from utils.misc import RED_SIZE, RSIZE
 
 
@@ -34,7 +35,7 @@ transform = transforms.Compose([
 ])
 
 # Loading model
-rnn_dir = join(args.logdir, 'mdrnn')
+rnn_dir = join(args.logdir, 'rnn')
 rnn_file = join(rnn_dir, 'best.tar')
 if not exists(rnn_dir):
     mkdir(rnn_dir)
@@ -53,15 +54,16 @@ device = torch.device("cuda:"+str(gpu_num) if torch.cuda.is_available() else "cp
 time_limit = 100
 bptt_len = 1
 target_update_period = 1000
+use_vrnn = False
 
-big_model = BigModel(args.logdir, device, time_limit)
+big_model = BigModel(args.logdir, device, time_limit, use_vrnn)
 optimizer = optim.Adam([
                             {'params': big_model.actor.parameters()},
                             {'params': big_model.critic.parameters()},
-                            {'params': big_model.mdrnn.parameters()}
+                            {'params': big_model.rnn.parameters()}
                         ])
 eps = np.finfo(np.float32).eps.item() # smallest representable number
-
+hidden_size = RSIZE*2 if use_vrnn else RSIZE
 
 # takes raw obs from environment
 # returns latent from vae
@@ -85,7 +87,7 @@ def train():
         # reset environment and episode reward
         obs = env.reset()
         rnn_hidden = [
-            torch.zeros(1, RSIZE).to(device)
+            torch.zeros(1, hidden_size).to(device)
             for _ in range(2)]
         done = False
         ep_reward = 0
@@ -93,7 +95,10 @@ def train():
 
         # initial state
         latent_mu = to_latent(obs, device)
-        state_value = big_model.critic(latent_mu, rnn_hidden[0])
+        if use_vrnn:
+            state_value = big_model.critic(latent_mu, reparameterize(rnn_hidden[0]))
+        else:
+            state_value = big_model.critic(latent_mu, rnn_hidden[0])
 
         # don't infinite loop while learning
         for t in range(time_limit):
@@ -130,7 +135,10 @@ def train():
 
             # update gradients due to changed delta
             if not done:
-                next_state_value = big_model.target_critic(latent_mu, rnn_hidden[0])
+                if use_vrnn:
+                    next_state_value = big_model.target_critic(latent_mu, reparameterize(rnn_hidden[0]))
+                else:
+                    next_state_value = big_model.target_critic(latent_mu, rnn_hidden[0])
                 delta_delta = args.gamma*next_state_value
                 delta_delta *= -1 # sign change to make step in the right direction
                 big_model.critic._increase_delta(delta_delta)
@@ -182,7 +190,7 @@ def train():
                  'critic_state_dict': big_model.critic.state_dict()},
                 join(ctrl_dir, 'best.tar'))
 
-            torch.save({'state_dict': big_model.mdrnn.state_dict()}, 
+            torch.save({'state_dict': big_model.rnn.state_dict()}, 
                     join(rnn_dir, 'best.tar'))
 
 

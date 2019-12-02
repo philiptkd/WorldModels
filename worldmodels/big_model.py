@@ -1,7 +1,8 @@
 from worldmodels.ctallec.models import MDRNNCell, VAE, Actor, Critic
+from worldmodels.vrnn import VRNNCell, reparameterize, kl_divergence
 from worldmodels.ctallec.models.mdrnn import gmm_loss
 from worldmodels.ctallec.utils.misc import RolloutGenerator
-from worldmodels.ctallec.utils.misc import ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE
+from worldmodels.ctallec.utils.misc import ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE, kl_coeff
 from torch.distributions import Categorical
 from collections import namedtuple
 import torch
@@ -11,7 +12,10 @@ class BigModel(RolloutGenerator):
     # assumes obs and hidden are already tensors on device
     def rnn_forward(self, latent_mu, hidden):
         # get actions
-        probs = self.actor(latent_mu, hidden[0])
+        if self.vrnn:
+            probs = self.actor(latent_mu, reparameterize(hidden[0]))
+        else:
+            probs = self.actor(latent_mu, hidden[0])
         dists = [Categorical(p) for p in probs] # distribution over actions for each agent
         actions = [dist.sample() for dist in dists]
         
@@ -20,8 +24,8 @@ class BigModel(RolloutGenerator):
         avg_entropy = sum([dist.entropy() for dist in dists])/len(dists)
 
         # forward through rnn
-        mu, sigma, logpi, r, d, next_hidden = self.mdrnn(torch.cat(actions).float().unsqueeze(0), latent_mu, hidden)
-        self.rnn_loss_args = (mu, sigma, logpi, r, d, latent_mu)
+        mu, sigma, logpi, r, d, next_hidden = self.rnn(torch.cat(actions).float().unsqueeze(0), latent_mu, hidden)
+        self.rnn_loss_args = (mu, sigma, logpi, r, d, latent_mu, next_hidden)
 
         actions = [action.item() for action in actions]
         return actions, log_probs, avg_entropy, next_hidden
@@ -42,7 +46,7 @@ class BigModel(RolloutGenerator):
         """
 
         # assumes SEQ_LEN = 1
-        mus, sigmas, logpis, rs, ds, latent_obs = self.rnn_loss_args
+        mus, sigmas, logpis, rs, ds, latent_obs, hidden = self.rnn_loss_args
         rewards, terminals = [torch.tensor(x, device=self.device, dtype=torch.float32).unsqueeze(0) for x in [reward, done]]
 
         gmm = gmm_loss(latent_next_obs, mus, sigmas, logpis)
@@ -54,5 +58,12 @@ class BigModel(RolloutGenerator):
         else:
             mse = 0
             scale = LSIZE + 1
-        loss = (gmm + bce + mse) / scale
-        return dict(gmm=gmm, bce=bce, mse=mse, loss=loss)
+
+        if self.vrnn:
+            scale += 1
+            kl = kl_coeff*kl_divergence(hidden[0])
+        else:
+            kl = 0
+
+        loss = (gmm + bce + mse + kl) / scale
+        return dict(gmm=gmm, bce=bce, mse=mse, loss=loss, kl=kl)
