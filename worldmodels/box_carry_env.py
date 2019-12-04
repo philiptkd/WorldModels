@@ -9,6 +9,7 @@ import time
 import contextlib
 with contextlib.redirect_stdout(None): # removes welcome message
     import pygame
+from worldmodels.gridspace import GridSpace
 
 
 class BoxCarryEnv(gym.Env):
@@ -30,7 +31,8 @@ class BoxCarryEnv(gym.Env):
 
     action_space = spaces.Discrete(7) # 4 cardinal directions, grab, release, and no-op
 
-    def __init__(self, field_size=96, agent_size=32, mode="rgb_array"):
+
+    def __init__(self, field_size=3, agent_size=1):
         self.seed()
 
         assert field_size % agent_size == 0
@@ -43,33 +45,100 @@ class BoxCarryEnv(gym.Env):
         self.box_start = [self.grid_size//2, self.grid_size//2]
         self.box_goal = [self.grid_size-1, self.grid_size-1]
 
-        self.mode = mode
-        if self.mode=="human":
-            pygame.display.init()
-            self.surface = pygame.display.set_mode([field_size, field_size])
-
-        self.observation_space = spaces.Box(low=0, high=255, shape=(self.field_size, self.field_size, 3), dtype=np.uint8)
-
-        channel = np.ones((self.agent_size, self.agent_size), dtype=np.uint8)
-        self.blue_square = np.stack([channel*0, channel*0, channel*255], axis=-1)
-        self.red_square = np.stack([channel*255, channel*0, channel*0], axis=-1)
-        self.green_square = np.stack([channel*0, channel*255, channel*0], axis=-1)
-
+        self.setup() # class-specific initialization
         self.reset()
+
+
+    def setup(self):
+        self.observation_space = GridSpace(self.grid_size, self.num_agents)
 
 
     def seed(self, seed=None):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
+
+    def is_pos_good(self):
+        for i,pos in enumerate(self.agents_pos):
+            if all(pos == self.box_pos):
+                print(pos, self.box_pos)
+                return False
+        return True
+
+
+    def get_reward(self):
+        x_dist = self.box_pos[1] - self.box_goal[1]
+        y_dist = self.box_pos[0] - self.box_goal[0]
+        return -np.sqrt(x_dist**2 + y_dist**2)
+    
+
+    # returns would-be new position if agent took action
+    def agent_step(self, agent, action):
+        pos = self.agents_pos[agent].copy()
+
+        # if staying, grabbing, or releasing, no need to check if current position is valid
+        if action == self.STAY:
+            return pos
+        if action == self.RELEASE:
+            self.agents_grabbing[agent] = 0
+            return pos
+        if action == self.GRAB and self.is_near_box(agent):
+            self.agents_grabbing[agent] = 1
+            return pos
+        
+        if action == self.LEFT:
+            pos[1] -= 1
+        elif action == self.RIGHT:
+            pos[1] += 1
+        elif action == self.UP:
+            pos[0] -= 1
+        elif action == self.DOWN:
+            pos[0] += 1
+            
+        if self.is_valid(agent, pos):
+            return pos
+        return self.agents_pos[agent]
+
+
+    # returns true if agent is only one step away from box position
+    def is_near_box(self, agent):
+        agent_box_diff = abs(self.agents_pos[agent] - self.box_pos)
+        return agent_box_diff.sum() == 1
+
+    # is new position within grid bounds
+    def is_in_bounds(self, pos):
+        return all([coord >= 0 and coord < self.grid_size for coord in pos]) 
+
+    # is new position occupied by an agent
+    def is_occupied(self, pos):
+        return any([all(self.agents_pos[i] == pos) for i in range(self.num_agents)]) 
+
+    # is new position blocked by un-grabbed box
+    def is_blocked(self, pos, agent):
+        return self.agents_grabbing[agent] == 0 and all(self.box_pos == pos)
+
+    # is new box position clear of non_grabbers
+    def is_clear(self, pos):
+        return not any([self.agents_grabbing[i] == 0 and all(self.agents_pos[i] == pos) for i in range(self.num_agents)]) 
+
+    def is_valid(self, agent, pos):
+        return self.is_in_bounds(pos) and not self.is_occupied(pos) and not self.is_blocked(pos, agent)
+
+
+    def reset(self):
+        self.agents_pos = np.array(self.agents_start)
+        self.box_pos = np.array(self.box_start)
+        self.agents_grabbing = [0]*self.num_agents
+        return self.render()
+
     def step(self, actions):
-        assert len(actions) == BoxCarryEnv.num_agents and all([BoxCarryEnv.action_space.contains(action) for action in actions])
+        assert len(actions) == self.num_agents and all([self.action_space.contains(action) for action in actions])
             
         grabbers = [i for (i,x) in enumerate(self.agents_grabbing) if x == 1]
-        non_grabbers = [i for i in range(BoxCarryEnv.num_agents) if i not in grabbers]
+        non_grabbers = [i for i in range(self.num_agents) if i not in grabbers]
 
         # if sufficient number of agents are grabbing the box
-        if len(grabbers) >= BoxCarryEnv.num_grabbers_needed:
+        if len(grabbers) >= self.num_grabbers_needed:
             new_positions = self.agents_pos.copy()
             box_delta = np.array([0., 0.])
             
@@ -100,80 +169,39 @@ class BoxCarryEnv(gym.Env):
         
         return observation, reward, done, info
 
-
-    def is_pos_good(self):
-        for i,pos in enumerate(self.agents_pos):
-            if all(pos == self.box_pos):
-                print(pos, self.box_pos)
-                return False
-        return True
-
-
-    def get_reward(self):
-        x_dist = self.box_pos[1] - self.box_goal[1]
-        y_dist = self.box_pos[0] - self.box_goal[0]
-        return -np.sqrt(x_dist**2 + y_dist**2)
     
-
-    # returns would-be new position if agent took action
-    def agent_step(self, agent, action):
-        pos = self.agents_pos[agent].copy()
-
-        # if staying, grabbing, or releasing, no need to check if current position is valid
-        if action == BoxCarryEnv.STAY:
-            return pos
-        if action == BoxCarryEnv.RELEASE:
-            self.agents_grabbing[agent] = 0
-            return pos
-        if action == BoxCarryEnv.GRAB and self.is_near_box(agent):
-            self.agents_grabbing[agent] = 1
-            return pos
-        
-        if action == BoxCarryEnv.LEFT:
-            pos[1] -= 1
-        elif action == BoxCarryEnv.RIGHT:
-            pos[1] += 1
-        elif action == BoxCarryEnv.UP:
-            pos[0] -= 1
-        elif action == BoxCarryEnv.DOWN:
-            pos[0] += 1
-            
-        if self.is_valid(agent, pos):
-            return pos
-        return self.agents_pos[agent]
+    def to_1D(self, pos):
+        assert len(pos) == 2
+        return pos[0]*self.grid_size + pos[1]
 
 
-    # returns true if agent is only one step away from box position
-    def is_near_box(self, agent):
-        agent_box_diff = abs(self.agents_pos[agent] - self.box_pos)
-        return agent_box_diff.sum() == 1
-
-    # is new position within grid bounds
-    def is_in_bounds(self, pos):
-        return all([coord >= 0 and coord < self.grid_size for coord in pos]) 
-
-    # is new position occupied by an agent
-    def is_occupied(self, pos):
-        return any([all(self.agents_pos[i] == pos) for i in range(BoxCarryEnv.num_agents)]) 
-
-    # is new position blocked by un-grabbed box
-    def is_blocked(self, pos, agent):
-        return self.agents_grabbing[agent] == 0 and all(self.box_pos == pos)
-
-    # is new box position clear of non_grabbers
-    def is_clear(self, pos):
-        return not any([self.agents_grabbing[i] == 0 and all(self.agents_pos[i] == pos) for i in range(BoxCarryEnv.num_agents)]) 
-
-    def is_valid(self, agent, pos):
-        return self.is_in_bounds(pos) and not self.is_occupied(pos) and not self.is_blocked(pos, agent)
+    def render(self):
+        arr = np.zeros(self.grid_size**2)
+        agent_idxs = [self.to_1D(pos) for pos in self.agents_pos]
+        arr[agent_idxs] = 1
+        box_idx = self.to_1D(self.box_pos)
+        arr[box_idx] = 2
+        return arr
 
 
-    def reset(self):
-        self.agents_pos = np.array(BoxCarryEnv.agents_start)
-        self.box_pos = np.array(self.box_start)
-        self.agents_grabbing = [0]*BoxCarryEnv.num_agents
-        return self.render()
-        
+class BoxCarryImgEnv(BoxCarryEnv):
+    def __init__(self, field_size=96, agent_size=32, mode="rgb_array"):
+        self.mode = mode
+        if self.mode=="human":
+            pygame.display.init()
+            self.surface = pygame.display.set_mode([field_size, field_size])
+
+        channel = np.ones((agent_size, agent_size), dtype=np.uint8)
+        self.blue_square = np.stack([channel*0, channel*0, channel*255], axis=-1)
+        self.red_square = np.stack([channel*255, channel*0, channel*0], axis=-1)
+        self.green_square = np.stack([channel*0, channel*255, channel*0], axis=-1)
+
+        super().__init__(field_size=field_size, agent_size=agent_size)
+
+
+    def setup(self):
+        self.observation_space = spaces.Box(low=0, high=255, shape=(self.field_size, self.field_size, 3), dtype=np.uint8)
+
 
     def insert_square(self, arr, pos, color):
         if color == "blue":
@@ -210,11 +238,11 @@ class BoxCarryEnv(gym.Env):
             return arr
             
         else:
-            super(MyEnv, self).render() # just raise an exception
+            raise NotImplementedError
 
 
 # running this file (not importing) tests and displays
 if __name__ == "__main__":
-    env = BoxCarryEnv(mode="human")
+    env = BoxCarryImgEnv(mode="human")
     for _ in range(100000):
         env.step([env.action_space.sample() for _ in range(env.num_agents)])
