@@ -57,10 +57,10 @@ else:
 env.seed(args.seed)
 torch.manual_seed(args.seed)
 
-gpu_num = np.random.randint(0,torch.cuda.device_count())
+gpu_num = 1#np.random.randint(0,torch.cuda.device_count())
 device = torch.device("cuda:"+str(gpu_num) if torch.cuda.is_available() else "cpu")
 time_limit = 100
-bptt_len = 4
+bptt_len = 2
 target_update_period = 1000
 
 env_size = env.grid_size**2
@@ -90,6 +90,19 @@ def get_rnn_in(obs, device):
     return latent_mu
 
 
+def check_grads(t):
+    for name, module in zip(["actor", "critic", "rnn"], [big_model.actor, big_model.critic, big_model.rnn]):
+        if all([p.grad is None for p in module.parameters()]):
+            print("t = "+str(t)+". No gradients for "+name)
+        elif all([(p.grad is None) or all(p.grad.flatten() == 0) for p in module.parameters()]):
+            print("t = "+str(t)+". Only zero gradients for "+name)
+    if all([p.grad is not None for p in big_model.target_critic.parameters()]):
+        print("t = "+str(t)+". Existing gradients for target critic")
+    if hasattr(big_model, 'vae'):
+        if all([p.grad is not None for p in big_model.vae.parameters()]):
+            print("t = "+str(t)+". Existing gradients for vae")
+
+
 def train():
     best = -np.inf
     avg_ep_reward = 0
@@ -116,12 +129,6 @@ def train():
             # copy parameters to target network
             if total_steps % target_update_period == 0:
                 big_model.target_critic.load_state_dict(big_model.critic.state_dict())
-
-            # only retain the (recurrent) graph for so many time steps
-            if (t+1)%bptt_len == 0:
-                h = rnn_hidden[0].detach()
-                c = rnn_hidden[1].detach()
-                rnn_hidden = (h, c)
 
             # get state value from critic
             rnn_in = get_rnn_in(obs, device)
@@ -169,14 +176,8 @@ def train():
                 aux_loss += mdrnn_loss["loss"]
             aux_loss.backward(retain_graph=True)
 
-            if t > 0:
-                for name, module in zip(["actor", "critic", "rnn"], [big_model.actor, big_model.critic, big_model.rnn]):
-                    for p in module.parameters():
-                        assert (p.grad is not None), "No gradient for "+name+" parameter with shape "+str(p.grad.shape)
-                        assert not all(p.grad.flatten() == 0),  "Zero gradient for "+name+" parameter with shape "+str(p.grad.shape)
-                for name, module in zip(["vae", "target_critic"], [big_model.vae, big_model.target_critic]):
-                    for p in module.parameters():
-                        assert p.grad is None, "Existing gradient for "+name+" parameter with shape "+str(p.grad.shape)
+            # ensure gradients exist when they should
+            #check_grads(t)
 
             # update parameters
             optimizer.step()
@@ -194,6 +195,12 @@ def train():
             discount *= args.gamma
             total_steps += 1
     
+            # only retain the (recurrent) graph for so many time steps
+            if (t+1)%bptt_len == 0:
+                h = rnn_hidden[0].detach()
+                c = rnn_hidden[1].detach()
+                rnn_hidden = (h, c)
+
         ep_rewards.append(ep_reward)
         avg_ep_reward += (ep_reward - avg_ep_reward)/i_episode
 

@@ -114,32 +114,32 @@ class BigModel(nn.Module):
         mus, sigmas, logpis, rs, ds, latent_obs, hidden = self.rnn_loss_args
         rewards, terminals = [torch.tensor(x, device=self.device, dtype=torch.float32).unsqueeze(0) for x in [reward, done]]
 
-        scale = 1
+        # predicting the next latent observation
+        gmm = gmm_loss(latent_next_obs, mus, sigmas, logpis)
+        scale = LSIZE
 
-        if not self.simple:
-            gmm = gmm_loss(latent_next_obs, mus, sigmas, logpis)
-            scale = LSIZE
-        else:
-            gmm = 0
-
+        # predicting whether the episode has ended
         if predict_terminals:
             bce = f.binary_cross_entropy_with_logits(ds, terminals)
             scale += 1
         else:
             bce = 0
 
+        # predicting the last reward
         if include_reward:
             mse = f.mse_loss(rs, rewards)
             scale += 1
         else:
             mse = 0
 
+        # information bottleneck on rnn hidden state. 
+        # (not confident in how this scales with LSIZE)
         if self.vrnn:
             kl = kl_coeff*kl_divergence(hidden[0])
             scale += 1
         else:
             kl = 0
-
+        
 
         loss = (gmm + bce + mse + kl) / scale
         return dict(gmm=gmm, bce=bce, mse=mse, loss=loss, kl=kl)
