@@ -13,17 +13,19 @@ from os.path import join, exists
 # action_size, latent_size, rnn_size, vae_in_size, 
 ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
     BoxCarryEnv.num_agents, 32, 256, 64, 64
-lamb = 0.6
-kl_coeff = 5
 RSIZE_simple = 64
+
 predict_terminals = False
 
 class BigModel(nn.Module):
-    def __init__(self, mdir, device, time_limit, vrnn: bool, simple: bool, env_size=None):
+    def __init__(self, mdir, device, time_limit, vrnn, simple, env_size, lamb, kl_coeff, predict_terminals):
         super(BigModel, self).__init__()
 
         self.vrnn = vrnn
         self.simple = simple
+        self.lamb = lamb
+        self.kl_coeff = kl_coeff
+        self.predict_terminals = predict_terminals
 
         """ Build vae, rnn, controller and environment. """
         # Loading world model and vae
@@ -42,7 +44,7 @@ class BigModel(nn.Module):
             self.vae.load_state_dict(vae_state['state_dict'])
 
         if self.simple:
-            assert (env_size is not None) and isinstance(env_size, int)
+            assert isinstance(env_size, int)
             obs_size = env_size
             rnn_size = RSIZE_simple
         else:
@@ -54,9 +56,9 @@ class BigModel(nn.Module):
         else:
             self.rnn = MDRNNCell(obs_size, ASIZE, rnn_size, 5).to(device)
 
-        self.actor = Actor(obs_size, rnn_size, ASIZE, lamb).to(device)
-        self.critic = Critic(obs_size, rnn_size, lamb).to(device)
-        self.target_critic = Critic(obs_size, rnn_size, lamb).to(device)
+        self.actor = Actor(obs_size, rnn_size, ASIZE, self.lamb).to(device)
+        self.critic = Critic(obs_size, rnn_size, self.lamb).to(device)
+        self.target_critic = Critic(obs_size, rnn_size, self.lamb).to(device)
 
         # load rnn and controller if they were previously saved
         if exists(rnn_file):
@@ -119,7 +121,7 @@ class BigModel(nn.Module):
         scale = LSIZE
 
         # predicting whether the episode has ended
-        if predict_terminals:
+        if self.predict_terminals:
             bce = f.binary_cross_entropy_with_logits(ds, terminals)
             scale += 1
         else:
@@ -135,7 +137,7 @@ class BigModel(nn.Module):
         # information bottleneck on rnn hidden state. 
         # (not confident in how this scales with LSIZE)
         if self.vrnn:
-            kl = kl_coeff*kl_divergence(hidden[0])
+            kl = self.kl_coeff*kl_divergence(hidden[0])
             scale += 1
         else:
             kl = 0

@@ -17,20 +17,33 @@ from worldmodels.vrnn import reparameterize
 parser = argparse.ArgumentParser(description='Actor Critic')
 parser.add_argument('--logdir', type=str, default="log_dir",
                     help='Where everything is stored.')
-parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
+parser.add_argument('--gamma', type=float, default=0.99,
                     help='discount factor (default: 0.99)')
-parser.add_argument('--seed', type=int, default=543, metavar='N',
+parser.add_argument('--seed', type=int, default=543,
                     help='random seed (default: 543)')
 parser.add_argument('--render', action='store_true',
                     help='render the environment')
-parser.add_argument('--log-interval', type=int, default=10, metavar='N',
+parser.add_argument('--log-interval', type=int, default=10,
                     help='interval between training status logs (default: 10)')
 parser.add_argument('--simple', action='store_true',
                     help='use the simple model')
 parser.add_argument('--use_vrnn', action='store_true',
                     help='use a VRNN for the dynamics model')
+parser.add_argument('--bptt_len', type=int, default=2,
+                    help='steps into the past that gradients backprop through the rnn (default: 2)')
+parser.add_argument('--time_limit', type=int, default=100,
+                    help='max number of environment steps per episode (default: 100)')
+parser.add_argument('--target_update_period', type=int, default=1000,
+                    help='period for updating the weights of the target critic network (default: 1000)')
+parser.add_argument('--lamb', type=float, default=0.6,
+                    help='lambda for TD(lambda) (default: 0.6)')
+parser.add_argument('--kl_coeff', type=float, default=5.0,
+                    help='coefficient for the kl portion of the rnn loss (default: 5.0)')
+parser.add_argument('--predict_terminals', action='store_true',
+                    help='include "done" prediction in rnn loss')
+parser.add_argument('--cooperate', action='store_true',
+                    help='require both agents to cooperate to move the box')
 args = parser.parse_args()
-
 
 img_transform = transforms.Compose([
     transforms.ToPILImage(),
@@ -49,22 +62,24 @@ ctrl_dir = join(args.logdir, 'ctrl')
 if not exists(ctrl_dir):
     mkdir(ctrl_dir)
 
-if args.simple:
-    env = gym.make('BoxCarry-v0')
+if args.cooperate:
+    grabbers_needed = 2
 else:
-    env = gym.make('BoxCarryImg-v0')
+    grabbers_needed = 1
+
+if args.simple:
+    env = gym.make('BoxCarry-v0', grabbers_needed=grabbers_needed)
+else:
+    env = gym.make('BoxCarryImg-v0', grabbers_needed=grabbers_needed)
 
 env.seed(args.seed)
 torch.manual_seed(args.seed)
 
 gpu_num = 1#np.random.randint(0,torch.cuda.device_count())
 device = torch.device("cuda:"+str(gpu_num) if torch.cuda.is_available() else "cpu")
-time_limit = 100
-bptt_len = 2
-target_update_period = 1000
 
 env_size = env.grid_size**2
-big_model = BigModel(args.logdir, device, time_limit, args.use_vrnn, args.simple, env_size)
+big_model = BigModel(args.logdir, device, args.time_limit, args.use_vrnn, args.simple, env_size, args.lamb, args.kl_coeff, args.predict_terminals)
 optimizer = optim.Adam(big_model.parameters())
 
 eps = np.finfo(np.float32).eps.item() # smallest representable number
@@ -125,9 +140,9 @@ def train():
         rnn_in = get_rnn_in(obs, device)
 
         # don't infinite loop while learning
-        for t in range(time_limit):
+        for t in range(args.time_limit):
             # copy parameters to target network
-            if total_steps % target_update_period == 0:
+            if total_steps % args.target_update_period == 0:
                 big_model.target_critic.load_state_dict(big_model.critic.state_dict())
 
             # get state value from critic
@@ -196,7 +211,7 @@ def train():
             total_steps += 1
     
             # only retain the (recurrent) graph for so many time steps
-            if (t+1)%bptt_len == 0:
+            if (t+1)%args.bptt_len == 0:
                 h = rnn_hidden[0].detach()
                 c = rnn_hidden[1].detach()
                 rnn_hidden = (h, c)

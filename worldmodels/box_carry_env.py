@@ -24,7 +24,6 @@ class BoxCarryEnv(gym.Env):
     metadata = {'render.modes': ['human', 'rgb_array']}
     
     num_agents = 2
-    num_grabbers_needed = 1
 
     assert num_agents <= 4 # max one agent per box side
     agents_start = [[0,i] for i in range(num_agents)] # arbitrary
@@ -32,11 +31,12 @@ class BoxCarryEnv(gym.Env):
     action_space = spaces.Discrete(7) # 4 cardinal directions, grab, release, and no-op
 
 
-    def __init__(self, field_size=3, agent_size=1):
+    def __init__(self, grabbers_needed, field_size=3, agent_size=1):
         self.seed()
 
         assert field_size % agent_size == 0
 
+        self.grabbers_needed = grabbers_needed
         self.field_size = field_size
         self.agent_size = agent_size
         self.grid_size = int(field_size/agent_size)
@@ -138,7 +138,7 @@ class BoxCarryEnv(gym.Env):
         non_grabbers = [i for i in range(self.num_agents) if i not in grabbers]
 
         # if sufficient number of agents are grabbing the box
-        if len(grabbers) >= self.num_grabbers_needed:
+        if len(grabbers) >= self.grabbers_needed:
             new_positions = self.agents_pos.copy()
             box_delta = np.array([0., 0.])
             
@@ -185,7 +185,7 @@ class BoxCarryEnv(gym.Env):
 
 
 class BoxCarryImgEnv(BoxCarryEnv):
-    def __init__(self, field_size=96, agent_size=32, mode="rgb_array"):
+    def __init__(self, grabbers_needed, field_size=96, agent_size=32, mode="rgb_array"):
         self.mode = mode
         if self.mode=="human":
             pygame.display.init()
@@ -196,7 +196,7 @@ class BoxCarryImgEnv(BoxCarryEnv):
         self.red_square = np.stack([channel*255, channel*0, channel*0], axis=-1)
         self.green_square = np.stack([channel*0, channel*255, channel*0], axis=-1)
 
-        super().__init__(field_size=field_size, agent_size=agent_size)
+        super().__init__(grabbers_needed, field_size=field_size, agent_size=agent_size)
 
 
     def setup(self):
