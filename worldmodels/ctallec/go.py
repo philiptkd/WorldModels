@@ -43,6 +43,10 @@ parser.add_argument('--predict_terminals', action='store_true',
                     help='include "done" prediction in rnn loss')
 parser.add_argument('--cooperate', action='store_true',
                     help='require both agents to cooperate to move the box')
+parser.add_argument('--num_episodes', type=int, default=200,
+                    help='episodes to train for each hyperparameter setting (default: 200)')
+parser.add_argument('--param_search', action='store_true',
+                    help='do a hyperparameter search')
 args = parser.parse_args()
 
 img_transform = transforms.Compose([
@@ -51,52 +55,50 @@ img_transform = transforms.Compose([
     transforms.ToTensor()
 ])
 
-# Loading model
-rnn_dir = join(args.logdir, 'rnn')
-rnn_file = join(rnn_dir, 'best.tar')
-if not exists(rnn_dir):
-    mkdir(rnn_dir)
-
-# create ctrl dir if non exitent
-ctrl_dir = join(args.logdir, 'ctrl')
-if not exists(ctrl_dir):
-    mkdir(ctrl_dir)
-
-if args.cooperate:
-    grabbers_needed = 2
-else:
-    grabbers_needed = 1
-
-if args.simple:
-    env = gym.make('BoxCarry-v0', grabbers_needed=grabbers_needed)
-else:
-    env = gym.make('BoxCarryImg-v0', grabbers_needed=grabbers_needed)
-
-env.seed(args.seed)
-torch.manual_seed(args.seed)
-
+# always need these
 gpu_num = 1#np.random.randint(0,torch.cuda.device_count())
 device = torch.device("cuda:"+str(gpu_num) if torch.cuda.is_available() else "cpu")
-
-env_size = env.grid_size**2
-big_model = BigModel(args.logdir, device, args.time_limit, args.use_vrnn, args.simple, env_size, args.lamb, args.kl_coeff, args.predict_terminals)
-optimizer = optim.Adam(big_model.parameters())
-
 eps = np.finfo(np.float32).eps.item() # smallest representable number
-hidden_size = RSIZE_simple if args.simple else RSIZE
-if args.use_vrnn:
-    hidden_size = hidden_size*2
+
+
+def hyperparam_search():
+    for predict_terminals in [True, False]:
+        for use_vrnn in [True, False]:
+            for simple in [True]:
+                for grabbers_needed in [1,2]:
+                    if simple:
+                        env = gym.make('BoxCarry-v0', grabbers_needed=grabbers_needed)
+                    else:
+                        env = gym.make('BoxCarryImg-v0', grabbers_needed=grabbers_needed)
+
+                    env.seed(args.seed)
+                    torch.manual_seed(args.seed)
+                    env_size = env.grid_size**2
+
+                    if grabbers_needed == 1:
+                        logdir = "log_dir_two_easy"
+                    elif grabbers_needed == 2:
+                        logdir = "log_dir_two"
+
+                    big_model = BigModel(logdir, device, args.time_limit, use_vrnn, simple, env_size, args.lamb, args.kl_coeff, predict_terminals)
+                    optimizer = optim.Adam(big_model.parameters())
+
+                    print("grabbers: {}, vrnn: {}, simple: {}, terminals: {}".format(
+                        env.grabbers_needed, big_model.use_vrnn, big_model.simple, big_model.predict_terminals))
+                    
+                    print("avg_reward:", train(env, big_model, optimizer), "\n")
+        
 
 # takes raw obs from environment
 # returns latent from vae
-def get_rnn_in(obs, device):
-    if args.simple:
+def get_rnn_in(obs, device, big_model):
+    if big_model.simple:
         obs = torch.Tensor(obs)/2 # normalize to [0,1]
     else:
         obs = img_transform(obs)
     obs = obs.unsqueeze(0).to(device)
 
-    if args.simple:
+    if big_model.simple:
         return obs
 
     # forward pass through fixed world model
@@ -118,26 +120,27 @@ def check_grads(t):
             print("t = "+str(t)+". Existing gradients for vae")
 
 
-def train():
+def train(env, big_model, optimizer):
     best = -np.inf
     avg_ep_reward = 0
     ep_rewards = []
     total_steps = 0
 
-    # run inifinitely many episodes
-    for i_episode in count(1):
-
+    ep_iter = count(1) if not args.param_search else range(1, args.num_episodes+1)
+    for i_episode in ep_iter:
         # reset environment and episode reward
         obs = env.reset()
+
+        rnn_size = big_model.rnn_size*2 if big_model.use_vrnn else big_model.rnn_size
         rnn_hidden = [
-            torch.zeros(1, hidden_size).to(device)
+            torch.zeros(1, rnn_size).to(device)
             for _ in range(2)]
         done = False
         ep_reward = 0
         discount = 1
 
         # initial state
-        rnn_in = get_rnn_in(obs, device)
+        rnn_in = get_rnn_in(obs, device, big_model)
 
         # don't infinite loop while learning
         for t in range(args.time_limit):
@@ -146,8 +149,8 @@ def train():
                 big_model.target_critic.load_state_dict(big_model.critic.state_dict())
 
             # get state value from critic
-            rnn_in = get_rnn_in(obs, device)
-            if args.use_vrnn:
+            rnn_in = get_rnn_in(obs, device, big_model)
+            if big_model.use_vrnn:
                 state_value = big_model.critic(rnn_in, reparameterize(rnn_hidden[0]))
             else:
                 state_value = big_model.critic(rnn_in, rnn_hidden[0])
@@ -175,7 +178,7 @@ def train():
             # update gradients due to changed delta
             if not done:
                 with torch.no_grad():
-                    if args.use_vrnn:
+                    if big_model.use_vrnn:
                         next_state_value = big_model.target_critic(rnn_in, reparameterize(rnn_hidden[0]))
                     else:
                         next_state_value = big_model.target_critic(rnn_in, rnn_hidden[0])
@@ -190,9 +193,6 @@ def train():
                 mdrnn_loss = big_model.get_mdrnn_loss(rnn_in, reward, done, include_reward=False)
                 aux_loss += mdrnn_loss["loss"]
             aux_loss.backward(retain_graph=True)
-
-            # ensure gradients exist when they should
-            #check_grads(t)
 
             # update parameters
             optimizer.step()
@@ -219,28 +219,68 @@ def train():
         ep_rewards.append(ep_reward)
         avg_ep_reward += (ep_reward - avg_ep_reward)/i_episode
 
+
         # log results
         if i_episode % args.log_interval == 0:
             print('Episode {}\tLast reward: {:.2f}\tAverage reward: {:.2f}'.format(
                   i_episode, ep_reward, avg_ep_reward))
-            
-            with open(join(ctrl_dir, "reward_hist.npy"), "wb+") as f:
-                np.save(f, ep_rewards)
+                
+        if not args.param_search:
+            # save reward history
+            if i_episode % args.log_interval == 0:
+                with open(join(ctrl_dir, "reward_hist.npy"), "wb+") as f:
+                    np.save(f, ep_rewards)
 
-        # save state
-        if avg_ep_reward > best:
-            best = avg_ep_reward
-            torch.save(
-                {'episode': i_episode,
-                 'reward': avg_ep_reward,
-                 'actor_state_dict': big_model.actor.state_dict(),
-                 'critic_state_dict': big_model.critic.state_dict()},
-                join(ctrl_dir, 'best.tar'))
+            # save state
+            if avg_ep_reward > best:
+                best = avg_ep_reward
+                torch.save(
+                    {'episode': i_episode,
+                     'reward': avg_ep_reward,
+                     'actor_state_dict': big_model.actor.state_dict(),
+                     'critic_state_dict': big_model.critic.state_dict()},
+                    join(ctrl_dir, 'best.tar'))
 
-            torch.save({'state_dict': big_model.rnn.state_dict()}, 
-                    join(rnn_dir, 'best.tar'))
+                torch.save({'state_dict': big_model.rnn.state_dict()}, 
+                        join(rnn_dir, 'best.tar'))
+    
+    # only returns if not infinite episodes
+    return avg_ep_reward
 
 
 
 if __name__ == '__main__':
-    train()
+    # if we don't do a hyperparameter search and just use the passed args
+    if args.param_search:
+        hyperparam_search()
+    else:
+        # Loading model
+        rnn_dir = join(args.logdir, 'rnn')
+        rnn_file = join(rnn_dir, 'best.tar')
+        if not exists(rnn_dir):
+            mkdir(rnn_dir)
+
+        # create ctrl dir if non exitent
+        ctrl_dir = join(args.logdir, 'ctrl')
+        if not exists(ctrl_dir):
+            mkdir(ctrl_dir)
+
+        if args.cooperate:
+            grabbers_needed = 2
+        else:
+            grabbers_needed = 1
+
+        if args.simple:
+            env = gym.make('BoxCarry-v0', grabbers_needed=grabbers_needed)
+        else:
+            env = gym.make('BoxCarryImg-v0', grabbers_needed=grabbers_needed)
+
+        env.seed(args.seed)
+        torch.manual_seed(args.seed)
+
+        env_size = env.grid_size**2
+
+        big_model = BigModel(args.logdir, device, args.time_limit, args.use_vrnn, args.simple, env_size, args.lamb, args.kl_coeff, args.predict_terminals)
+        optimizer = optim.Adam(big_model.parameters())
+
+        train(env, big_model, optimizer)

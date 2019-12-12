@@ -18,10 +18,10 @@ RSIZE_simple = 64
 predict_terminals = False
 
 class BigModel(nn.Module):
-    def __init__(self, mdir, device, time_limit, vrnn, simple, env_size, lamb, kl_coeff, predict_terminals):
+    def __init__(self, mdir, device, time_limit, use_vrnn, simple, env_size, lamb, kl_coeff, predict_terminals):
         super(BigModel, self).__init__()
 
-        self.vrnn = vrnn
+        self.use_vrnn = use_vrnn
         self.simple = simple
         self.lamb = lamb
         self.kl_coeff = kl_coeff
@@ -34,7 +34,7 @@ class BigModel(nn.Module):
 
         # the simple version of the model doesn't have a vae
         if not self.simple:
-            assert exists(vae_file), "VAE is untrained." + vae_file
+            assert exists(vae_file), "Trained vae file does not exist at " + vae_file
 
             vae_state = torch.load(vae_file, map_location={'cuda:0': str(device)})
             print("Loading VAE at epoch {} with test loss {}".format(
@@ -45,20 +45,20 @@ class BigModel(nn.Module):
 
         if self.simple:
             assert isinstance(env_size, int)
-            obs_size = env_size
-            rnn_size = RSIZE_simple
+            self.obs_size = env_size
+            self.rnn_size = RSIZE_simple
         else:
-            obs_size = LSIZE
-            rnn_size = RSIZE
+            self.obs_size = LSIZE
+            self.rnn_size = RSIZE
 
-        if vrnn:
-            self.rnn = VRNNCell(obs_size, ASIZE, rnn_size, 5).to(device)
+        if self.use_vrnn:
+            self.rnn = VRNNCell(self.obs_size, ASIZE, self.rnn_size, 5).to(device)
         else:
-            self.rnn = MDRNNCell(obs_size, ASIZE, rnn_size, 5).to(device)
+            self.rnn = MDRNNCell(self.obs_size, ASIZE, self.rnn_size, 5).to(device)
 
-        self.actor = Actor(obs_size, rnn_size, ASIZE, self.lamb).to(device)
-        self.critic = Critic(obs_size, rnn_size, self.lamb).to(device)
-        self.target_critic = Critic(obs_size, rnn_size, self.lamb).to(device)
+        self.actor = Actor(self.obs_size, self.rnn_size, ASIZE, self.lamb).to(device)
+        self.critic = Critic(self.obs_size, self.rnn_size, self.lamb).to(device)
+        self.target_critic = Critic(self.obs_size, self.rnn_size, self.lamb).to(device)
 
         # load rnn and controller if they were previously saved
         if exists(rnn_file):
@@ -79,7 +79,7 @@ class BigModel(nn.Module):
     # assumes obs and hidden are already tensors on device
     def rnn_forward(self, latent_mu, hidden):
         # get actions
-        if self.vrnn:
+        if self.use_vrnn:
             probs = self.actor(latent_mu, reparameterize(hidden[0]))
         else:
             probs = self.actor(latent_mu, hidden[0])
@@ -136,7 +136,7 @@ class BigModel(nn.Module):
 
         # information bottleneck on rnn hidden state. 
         # (not confident in how this scales with LSIZE)
-        if self.vrnn:
+        if self.use_vrnn:
             kl = self.kl_coeff*kl_divergence(hidden[0])
             scale += 1
         else:
