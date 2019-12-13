@@ -75,14 +75,13 @@ def hyperparam_search():
 
                     env.seed(args.seed)
                     torch.manual_seed(args.seed)
-                    env_size = env.grid_size**2
 
                     if grabbers_needed == 1:
                         logdir = "log_dir_two_easy"
                     elif grabbers_needed == 2:
                         logdir = "log_dir_two"
 
-                    big_model = BigModel(logdir, device, args.time_limit, use_vrnn, simple, env_size, args.lamb, args.kl_coeff, predict_terminals)
+                    big_model = BigModel(logdir, device, args.time_limit, use_vrnn, simple, args.kl_coeff, predict_terminals, env)
                     optimizer = optim.Adam(big_model.parameters())
 
                     print("grabbers: {}, vrnn: {}, simple: {}, terminals: {}".format(

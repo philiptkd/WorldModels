@@ -1,4 +1,4 @@
-from worldmodels.ctallec.models import MDRNNCell, VAE, Actor, Critic
+from worldmodels.ctallec.models import MDRNNCell, VAE, QNetwork
 from worldmodels.vrnn import VRNNCell, reparameterize, kl_divergence
 from worldmodels.ctallec.models.mdrnn import gmm_loss
 from torch.distributions import Categorical
@@ -14,18 +14,19 @@ from os.path import join, exists
 ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
     BoxCarryEnv.num_agents, 32, 256, 64, 64
 RSIZE_simple = 64
+eps = 0.1
 
 predict_terminals = False
 
 class BigModel(nn.Module):
-    def __init__(self, mdir, device, time_limit, use_vrnn, simple, env_size, lamb, kl_coeff, predict_terminals):
+    def __init__(self, mdir, device, time_limit, use_vrnn, simple, kl_coeff, predict_terminals, env):
         super(BigModel, self).__init__()
 
         self.use_vrnn = use_vrnn
         self.simple = simple
-        self.lamb = lamb
         self.kl_coeff = kl_coeff
         self.predict_terminals = predict_terminals
+        self.env = env
 
         """ Build vae, rnn, controller and environment. """
         # Loading world model and vae
@@ -44,8 +45,7 @@ class BigModel(nn.Module):
             self.vae.load_state_dict(vae_state['state_dict'])
 
         if self.simple:
-            assert isinstance(env_size, int)
-            self.obs_size = env_size
+            self.obs_size = self.env.grid_size**2
             self.rnn_size = RSIZE_simple
         else:
             self.obs_size = LSIZE
@@ -56,10 +56,9 @@ class BigModel(nn.Module):
         else:
             self.rnn = MDRNNCell(self.obs_size, ASIZE, self.rnn_size, 5).to(device)
 
-        self.actor = Actor(self.obs_size, self.rnn_size, ASIZE, self.lamb).to(device)
-        self.critic = Critic(self.obs_size, self.rnn_size, self.lamb).to(device)
-        self.target_critic = Critic(self.obs_size, self.rnn_size, self.lamb).to(device)
-
+        self.qnet = QNetwork(self.obs_size, self.rnn_size, ASIZE).to(device)
+        self.target_qnet = QNetwork(self.obs_size, self.rnn_size, ASIZE).to(device)
+        
         # load rnn and controller if they were previously saved
         if exists(rnn_file):
             rnn_state = torch.load(rnn_file, map_location={'cuda:0': str(device)})
@@ -70,8 +69,8 @@ class BigModel(nn.Module):
             ctrl_state = torch.load(ctrl_file, map_location={'cuda:0': str(device)})
             print("Loading Controller with reward {}".format(
                 ctrl_state['reward']))
-            self.actor.load_state_dict(ctrl_state['actor_state_dict'])
-            self.critic.load_state_dict(ctrl_state['critic_state_dict'])
+            self.qnet.load_state_dict(ctrl_state['critic_state_dict'])
+            self.target_qnet.load_state_dict(ctrl_state['critic_state_dict'])
 
         self.device = device
         self.time_limit = time_limit
@@ -80,22 +79,23 @@ class BigModel(nn.Module):
     def rnn_forward(self, latent_mu, hidden):
         # get actions
         if self.use_vrnn:
-            probs = self.actor(latent_mu, reparameterize(hidden[0]))
+            Q = self.qnet(latent_mu, reparameterize(hidden[0]))
         else:
-            probs = self.actor(latent_mu, hidden[0])
-        dists = [Categorical(p) for p in probs] # distribution over actions for each agent
-        actions = [dist.sample() for dist in dists]
-        
-        # save log probs and average entropy
-        log_probs = [dist.log_prob(action) for dist, action in zip(dists, actions)]
-        avg_entropy = sum([dist.entropy() for dist in dists])/len(dists)
+            Q = self.qnet(latent_mu, hidden[0])
+        Q = torch.stack(Q) # from list of 1D tensors to 2D tensor
+
+        rands = torch.empty_like(Q).uniform_(0, 1)
+        rand_mask = rands.le(eps)
+        rand_actions = torch.multinomial(torch.ones(self.env.action_space.n), self.env.num_agents, replacement=True)
+        max_actions = Q.argmax(dim=1) # currently not breaking ties fairly
+        actions = torch.where(rand_mask, rand_actions, max_actions)
 
         # forward through rnn
-        mu, sigma, logpi, r, d, next_hidden = self.rnn(torch.cat(actions).float().unsqueeze(0), latent_mu, hidden)
+        mu, sigma, logpi, r, d, next_hidden = self.rnn(actions.float().unsqueeze(0), latent_mu, hidden)
         self.rnn_loss_args = (mu, sigma, logpi, r, d, latent_mu, next_hidden)
 
         actions = [action.item() for action in actions]
-        return actions, log_probs, avg_entropy, next_hidden
+        return actions, next_hidden
 
 
     def get_mdrnn_loss(self, latent_next_obs, reward, done, include_reward: bool):
