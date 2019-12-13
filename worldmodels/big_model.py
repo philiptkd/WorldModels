@@ -144,4 +144,8 @@ class BigModel(nn.Module):
         
 
         loss = (gmm + bce + mse + kl) / scale
+            
+        # clear memory
+        del self.rnn_loss_args
+
         return dict(gmm=gmm, bce=bce, mse=mse, loss=loss, kl=kl)

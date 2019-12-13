@@ -62,6 +62,8 @@ eps = np.finfo(np.float32).eps.item() # smallest representable number
 
 
 def hyperparam_search():
+    global total_steps
+
     for predict_terminals in [True, False]:
         for use_vrnn in [True, False]:
             for simple in [True]:
@@ -86,6 +88,7 @@ def hyperparam_search():
                     print("grabbers: {}, vrnn: {}, simple: {}, terminals: {}".format(
                         env.grabbers_needed, big_model.use_vrnn, big_model.simple, big_model.predict_terminals))
                     
+                    total_steps = 0
                     print("avg_reward:", train(env, big_model, optimizer), "\n")
         
 
@@ -120,105 +123,104 @@ def check_grads(t):
             print("t = "+str(t)+". Existing gradients for vae")
 
 
+def td_lambda(env, big_model):
+    global total_steps
+
+    obs = env.reset()
+    rnn_size = big_model.rnn_size*2 if big_model.use_vrnn else big_model.rnn_size
+    rnn_hidden = [
+        torch.zeros(1, rnn_size).to(device)
+        for _ in range(2)]
+    discount = 1
+
+    # initial state
+    rnn_in = get_rnn_in(obs, device, big_model)
+
+    # don't infinite loop while learning
+    for t in range(args.time_limit):
+        # copy parameters to target network
+        if total_steps % args.target_update_period == 0:
+            big_model.target_critic.load_state_dict(big_model.critic.state_dict())
+        total_steps += 1
+
+        # get state value from critic
+        rnn_in = get_rnn_in(obs, device, big_model)
+        if big_model.use_vrnn:
+            state_value = big_model.critic(rnn_in, reparameterize(rnn_hidden[0]))
+        else:
+            state_value = big_model.critic(rnn_in, rnn_hidden[0])
+
+        # get action from actor and step forward through rnn
+        actions, log_probs, avg_entropy, rnn_hidden = big_model.rnn_forward(rnn_in, rnn_hidden)
+
+        # step in environment by performing actions
+        obs, reward, done, _ = env.step(actions)
+
+        # get delta
+        delta = reward - state_value
+        delta *= -1 # sign change to make step in the right direction
+        
+        # get actor and critic gradients with respect to current state before evaluating next state
+        state_value.backward(retain_graph=True)
+        for log_prob in log_probs:
+            log_prob.backward(retain_graph=True) # to backprop through entropy later
+
+        # update gradients with eligibility traces
+        big_model.critic._update_grads_with_eligibility(delta, 1, t, args.gamma)
+        big_model.actor._update_grads_with_eligibility(delta, discount, t, args.gamma)
+
+        # update gradients due to changed delta
+        if not done:
+            with torch.no_grad():
+                if big_model.use_vrnn:
+                    next_state_value = big_model.target_critic(rnn_in, reparameterize(rnn_hidden[0]))
+                else:
+                    next_state_value = big_model.target_critic(rnn_in, rnn_hidden[0])
+            delta_delta = args.gamma*next_state_value
+            delta_delta *= -1 # sign change to make step in the right direction
+            big_model.critic._increase_delta(delta_delta)
+            big_model.actor._increase_delta(delta_delta)
+
+        # update gradients to include entropy loss and mdrnn loss
+        aux_loss = -avg_entropy
+        if not done:
+            mdrnn_loss = big_model.get_mdrnn_loss(rnn_in, reward, done, include_reward=False)
+            aux_loss += mdrnn_loss["loss"]
+        aux_loss.backward(retain_graph=True)
+
+        # prepare for next time step
+        discount *= args.gamma
+            
+        # only retain the (recurrent) graph for so many time steps
+        if (t+1)%args.bptt_len == 0:
+            h = rnn_hidden[0].detach()
+            c = rnn_hidden[1].detach()
+            rnn_hidden = (h, c)
+
+        yield reward, done
+    
+
+
 def train(env, big_model, optimizer):
     best = -np.inf
     avg_ep_reward = 0
     ep_rewards = []
-    total_steps = 0
 
     ep_iter = count(1) if not args.param_search else range(1, args.num_episodes+1)
     for i_episode in ep_iter:
-        # reset environment and episode reward
-        obs = env.reset()
-
-        rnn_size = big_model.rnn_size*2 if big_model.use_vrnn else big_model.rnn_size
-        rnn_hidden = [
-            torch.zeros(1, rnn_size).to(device)
-            for _ in range(2)]
-        done = False
         ep_reward = 0
-        discount = 1
+        grad_gen = td_lambda(env, big_model) # forward and backward through model, generating parameter gradients
+        done = False
 
-        # initial state
-        rnn_in = get_rnn_in(obs, device, big_model)
-
-        # don't infinite loop while learning
-        for t in range(args.time_limit):
-            # copy parameters to target network
-            if total_steps % args.target_update_period == 0:
-                big_model.target_critic.load_state_dict(big_model.critic.state_dict())
-
-            # get state value from critic
-            rnn_in = get_rnn_in(obs, device, big_model)
-            if big_model.use_vrnn:
-                state_value = big_model.critic(rnn_in, reparameterize(rnn_hidden[0]))
-            else:
-                state_value = big_model.critic(rnn_in, rnn_hidden[0])
-
-            # get action from actor and step forward through rnn
-            actions, log_probs, avg_entropy, rnn_hidden = big_model.rnn_forward(rnn_in, rnn_hidden)
-
-            # step
-            obs, reward, done, _ = env.step(actions)
-
-            # get delta
-            delta = reward - state_value
-            delta *= -1 # sign change to make step in the right direction
-            
-            # get actor and critic gradients with respect to current state before evaluating next state
+        while not done:
             optimizer.zero_grad()
-            state_value.backward(retain_graph=True)
-            for log_prob in log_probs:
-                log_prob.backward(retain_graph=True) # to backprop through entropy later
-
-            # update gradients with eligibility traces
-            big_model.critic._update_grads_with_eligibility(delta, 1, t, args.gamma)
-            big_model.actor._update_grads_with_eligibility(delta, discount, t, args.gamma)
-
-            # update gradients due to changed delta
-            if not done:
-                with torch.no_grad():
-                    if big_model.use_vrnn:
-                        next_state_value = big_model.target_critic(rnn_in, reparameterize(rnn_hidden[0]))
-                    else:
-                        next_state_value = big_model.target_critic(rnn_in, rnn_hidden[0])
-                delta_delta = args.gamma*next_state_value
-                delta_delta *= -1 # sign change to make step in the right direction
-                big_model.critic._increase_delta(delta_delta)
-                big_model.actor._increase_delta(delta_delta)
-
-            # update gradients to include entropy loss and mdrnn loss
-            aux_loss = -avg_entropy
-            if not done:
-                mdrnn_loss = big_model.get_mdrnn_loss(rnn_in, reward, done, include_reward=False)
-                aux_loss += mdrnn_loss["loss"]
-            aux_loss.backward(retain_graph=True)
-
-            # update parameters
+            reward, done = next(grad_gen)
             optimizer.step()
 
-            # log reward
             ep_reward += reward
-            
-            # clear memory
-            del big_model.rnn_loss_args
-
-            if done:
-                break
-
-            # prepare for next time step
-            discount *= args.gamma
-            total_steps += 1
     
-            # only retain the (recurrent) graph for so many time steps
-            if (t+1)%args.bptt_len == 0:
-                h = rnn_hidden[0].detach()
-                c = rnn_hidden[1].detach()
-                rnn_hidden = (h, c)
-
         ep_rewards.append(ep_reward)
         avg_ep_reward += (ep_reward - avg_ep_reward)/i_episode
-
 
         # log results
         if i_episode % args.log_interval == 0:
@@ -246,7 +248,6 @@ def train(env, big_model, optimizer):
     
     # only returns if not infinite episodes
     return avg_ep_reward
-
 
 
 if __name__ == '__main__':
@@ -283,4 +284,5 @@ if __name__ == '__main__':
         big_model = BigModel(args.logdir, device, args.time_limit, args.use_vrnn, args.simple, env_size, args.lamb, args.kl_coeff, args.predict_terminals)
         optimizer = optim.Adam(big_model.parameters())
 
+        total_steps = 0
         train(env, big_model, optimizer)
