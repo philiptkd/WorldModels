@@ -47,7 +47,7 @@ class TraceModule(nn.Module):
 
 
 class Actor(TraceModule):
-    def __init__(self, latent_size, rnn_size, num_agents, lamb):
+    def __init__(self, latent_size, rnn_size, num_agents, lamb=1):
         super().__init__(lamb)
       
         self.heads= nn.ModuleList()
@@ -66,7 +66,7 @@ class Actor(TraceModule):
 
 
 class Critic(TraceModule):
-    def __init__(self, latent_size, rnn_size, lamb):
+    def __init__(self, latent_size, rnn_size, lamb=1):
         super().__init__(lamb)
         self.fc = nn.Linear(latent_size + rnn_size, 1)
 

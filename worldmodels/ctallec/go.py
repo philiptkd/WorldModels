@@ -6,6 +6,7 @@ from os.path import join, exists
 from os import mkdir
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import transforms
@@ -59,11 +60,10 @@ img_transform = transforms.Compose([
 gpu_num = 1#np.random.randint(0,torch.cuda.device_count())
 device = torch.device("cuda:"+str(gpu_num) if torch.cuda.is_available() else "cpu")
 eps = np.finfo(np.float32).eps.item() # smallest representable number
-
+batch_size = 20
+beta0 = 0.4  # from paper
 
 def hyperparam_search():
-    global total_steps
-
     for predict_terminals in [True, False]:
         for use_vrnn in [True, False]:
             for simple in [True]:
@@ -87,27 +87,8 @@ def hyperparam_search():
                     print("grabbers: {}, vrnn: {}, simple: {}, terminals: {}".format(
                         env.grabbers_needed, big_model.use_vrnn, big_model.simple, big_model.predict_terminals))
                     
-                    total_steps = 0
                     print("avg_reward:", train(env, big_model, optimizer), "\n")
         
-
-# takes raw obs from environment
-# returns latent from vae
-def get_rnn_in(obs, device, big_model):
-    if big_model.simple:
-        obs = torch.Tensor(obs)/2 # normalize to [0,1]
-    else:
-        obs = img_transform(obs)
-    obs = obs.unsqueeze(0).to(device)
-
-    if big_model.simple:
-        return obs
-
-    # forward pass through fixed world model
-    with torch.no_grad():
-        _, latent_mu, _ = big_model.vae(obs)
-    return latent_mu
-
 
 def check_grads(t):
     for name, module in zip(["actor", "critic", "rnn"], [big_model.actor, big_model.critic, big_model.rnn]):
@@ -115,89 +96,82 @@ def check_grads(t):
             print("t = "+str(t)+". No gradients for "+name)
         elif all([(p.grad is None) or all(p.grad.flatten() == 0) for p in module.parameters()]):
             print("t = "+str(t)+". Only zero gradients for "+name)
-    if all([p.grad is not None for p in big_model.target_critic.parameters()]):
-        print("t = "+str(t)+". Existing gradients for target critic")
     if hasattr(big_model, 'vae'):
         if all([p.grad is not None for p in big_model.vae.parameters()]):
             print("t = "+str(t)+". Existing gradients for vae")
 
 
-def td_lambda(env, big_model):
-    global total_steps
+# for now, igorning the fact that the target and behavior policies are different
+def get_grads(env, big_model):
+    # sample from replay buffer
+    # weights and indicies are both of length batch_size
+    # the others are arrays of size (batch_size, max_rollout_len, *)
+    beta = 1 #beta0 + episode*(1-beta0)/episodes   # linear annealing schedule for IS weights. #TODO: turn back on
+    states, actions, rewards, probs, weights, indicies = big_model.replay.sample(batch_size, beta)
+    states = states.squeeze().transpose((1, 0, 2)) # (max_rollout_len, batch_size, latent_size)
 
-    obs = env.reset()
+    rewards = rewards.transpose() # (max_rollout_len, batch_size)
+
+    # TODO: calculate importance sampled returns based on action probabilities
+    returns = np.cumsum(rewards, axis=0) # returns from each time step in each rollout. shape (max_rollout_len, batch_size)
+    returns = (returns - returns.mean()) / (returns.std() + eps)
+
+    states, returns, weights = [torch.Tensor(x).to(device) for x in [states, returns, weights]]
+
+    # initial rnn input
     rnn_size = big_model.rnn_size*2 if big_model.use_vrnn else big_model.rnn_size
     rnn_hidden = [
-        torch.zeros(1, rnn_size).to(device)
+        torch.zeros(batch_size, rnn_size).to(device)
         for _ in range(2)]
-    discount = 1
 
-    # initial state
-    rnn_in = get_rnn_in(obs, device, big_model)
+    critic_losses = []
+    policy_losses = []
+    entropies = []
+    avg_advantage = 0
 
-    # don't infinite loop while learning
-    for t in range(args.time_limit):
-        # copy parameters to target network
-        if total_steps % args.target_update_period == 0:
-            big_model.target_critic.load_state_dict(big_model.critic.state_dict())
-        total_steps += 1
+    for t, (state, ret) in enumerate(zip(states, returns)):
+        mask = torch.Tensor([not all([x == 0 for x in y]) for y in state]).to(device) # boolean mask of shape (batch_size,)
 
-        # get state value from critic
-        rnn_in = get_rnn_in(obs, device, big_model)
+        # get losses for the critic
         if big_model.use_vrnn:
-            state_value = big_model.critic(rnn_in, reparameterize(rnn_hidden[0]))
+            state_value = big_model.critic(state, reparameterize(rnn_hidden[0]))
         else:
-            state_value = big_model.critic(rnn_in, rnn_hidden[0])
-
-        # get action from actor and step forward through rnn
-        actions, log_probs, avg_entropy, rnn_hidden = big_model.rnn_forward(rnn_in, rnn_hidden)
-
-        # step in environment by performing actions
-        obs, reward, done, _ = env.step(actions)
-
-        # get delta
-        delta = reward - state_value
-        delta *= -1 # sign change to make step in the right direction
+            state_value = big_model.critic(state, rnn_hidden[0])
         
-        # get actor and critic gradients with respect to current state before evaluating next state
-        state_value.backward(retain_graph=True)
-        for log_prob in log_probs:
-            log_prob.backward(retain_graph=True) # to backprop through entropy later
+        # mask state_value and ret
+        state_value = state_value * mask
+        ret = ret * mask
 
-        # update gradients with eligibility traces
-        big_model.critic._update_grads_with_eligibility(delta, 1, t, args.gamma)
-        big_model.actor._update_grads_with_eligibility(delta, discount, t, args.gamma)
+        mse_criterion = nn.MSELoss()
+        critic_losses.append(mse_criterion(state_value, ret))
 
-        # update gradients due to changed delta
-        if not done:
-            with torch.no_grad():
-                if big_model.use_vrnn:
-                    next_state_value = big_model.target_critic(rnn_in, reparameterize(rnn_hidden[0]))
-                else:
-                    next_state_value = big_model.target_critic(rnn_in, rnn_hidden[0])
-            delta_delta = args.gamma*next_state_value
-            delta_delta *= -1 # sign change to make step in the right direction
-            big_model.critic._increase_delta(delta_delta)
-            big_model.actor._increase_delta(delta_delta)
+        # get losses for the actor
+        advantage = ret - state_value.detach() # (batch_size,)
+        weighted_advantage = advantage * weights # prioritized replay
+        _, log_probs, avg_entropy, rnn_hidden, these_probs = big_model.rnn_forward(state, rnn_hidden)
+        log_probs = log_probs.transpose() # (num_agents, batch_size)
+        policy_losses += [-log_prob * weighted_advantage for log_prob in log_probs] # add all agents' policy losses
+        entropies.append(avg_entropy * mask) 
 
-        # update gradients to include entropy loss and mdrnn loss
-        aux_loss = -avg_entropy
-        if not done:
-            mdrnn_loss = big_model.get_mdrnn_loss(rnn_in, reward, done, include_reward=False)
-            aux_loss += mdrnn_loss["loss"]
-        aux_loss.backward(retain_graph=True)
-
-        # prepare for next time step
-        discount *= args.gamma
-            
-        # only retain the (recurrent) graph for so many time steps
+        # periodically detach to limit backprop through time
         if (t+1)%args.bptt_len == 0:
             h = rnn_hidden[0].detach()
             c = rnn_hidden[1].detach()
             rnn_hidden = (h, c)
 
-        yield reward, done
-    
+        # for updating replay priorities later
+        avg_advantage += (advantage - avg_advantage)/(t+1)
+
+    # update priority replay priorities
+    big_model.replay.update_priorities(indices, np.abs(avg_advantage)+1e-3)   # add small number to prevent never sampling 0 error transitions
+
+    # update gradients
+    loss = torch.stack(policy_losses).sum() + torch.stack(critic_losses).sum() - torch.stack(entropies).sum()
+    loss.backward()
+
+    # TODO: fix mdrnn loss
+    #    mdrnn_loss = big_model.get_mdrnn_loss(rnn_in, reward, done, include_reward=False)["loss"]
+    #mdrnn_loss.backward(retain_graph=True)
 
 
 def train(env, big_model, optimizer):
@@ -206,18 +180,17 @@ def train(env, big_model, optimizer):
     ep_rewards = []
 
     ep_iter = count(1) if not args.param_search else range(1, args.num_episodes+1)
+
+    # for each episode
     for i_episode in ep_iter:
-        ep_reward = 0
-        grad_gen = td_lambda(env, big_model) # forward and backward through model, generating parameter gradients
-        done = False
+        # get new experience
+        ep_reward = big_model.add_rollout_to_buffer()
 
-        while not done:
-            optimizer.zero_grad()
-            reward, done = next(grad_gen)
-            optimizer.step()
+        # learn from batch of past experience
+        optimizer.zero_grad()
+        get_grads(env, big_model)
+        optimizer.step()
 
-            ep_reward += reward
-    
         ep_rewards.append(ep_reward)
         avg_ep_reward += (ep_reward - avg_ep_reward)/i_episode
 
@@ -280,8 +253,7 @@ if __name__ == '__main__':
 
         env_size = env.grid_size**2
 
-        big_model = BigModel(args.logdir, device, args.time_limit, args.use_vrnn, args.simple, env_size, args.lamb, args.kl_coeff, args.predict_terminals)
+        big_model = BigModel(args.logdir, device, args.time_limit, args.use_vrnn, args.simple, args.kl_coeff, args.predict_terminals, env)
         optimizer = optim.Adam(big_model.parameters())
 
-        total_steps = 0
         train(env, big_model, optimizer)

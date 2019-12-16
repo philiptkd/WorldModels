@@ -128,7 +128,11 @@ class MDRNNCell(_MDRNNBase):
             - rs: (BSIZE) torch tensor
             - ds: (BSIZE) torch tensor
         """
-        in_al = torch.cat([action, latent], dim=1)
+        try:
+            in_al = torch.cat([action, latent], dim=1)
+        except:
+            print(action.shape, latent.shape)
+            raise Exception
 
         next_hidden = self.rnn(in_al, hidden)
         out_rnn = next_hidden[0]

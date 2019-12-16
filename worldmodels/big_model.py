@@ -1,4 +1,4 @@
-from worldmodels.ctallec.models import MDRNNCell, VAE, QNetwork
+from worldmodels.ctallec.models import MDRNNCell, VAE, Actor, Critic
 from worldmodels.vrnn import VRNNCell, reparameterize, kl_divergence
 from worldmodels.ctallec.models.mdrnn import gmm_loss
 from torch.distributions import Categorical
@@ -8,15 +8,19 @@ import torch.nn as nn
 import torch.nn.functional as f
 from worldmodels.box_carry_env import BoxCarryEnv, BoxCarryImgEnv
 from os.path import join, exists
+from worldmodels.experience_replay import ExperienceReplay, ProportionalReplay
+import numpy as np
 
 # Hardcoded for now
 # action_size, latent_size, rnn_size, vae_in_size, 
 ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE =\
     BoxCarryEnv.num_agents, 32, 256, 64, 64
 RSIZE_simple = 64
-eps = 0.1
 
-predict_terminals = False
+prioritized_replay = True
+prioritized_replay_alpha = 0.6  # from paper
+max_buffer_size = 1000
+beta0 = 0.4  # from paper
 
 class BigModel(nn.Module):
     def __init__(self, mdir, device, time_limit, use_vrnn, simple, kl_coeff, predict_terminals, env):
@@ -56,9 +60,9 @@ class BigModel(nn.Module):
         else:
             self.rnn = MDRNNCell(self.obs_size, ASIZE, self.rnn_size, 5).to(device)
 
-        self.qnet = QNetwork(self.obs_size, self.rnn_size, ASIZE).to(device)
-        self.target_qnet = QNetwork(self.obs_size, self.rnn_size, ASIZE).to(device)
-        
+        self.actor = Actor(self.obs_size, self.rnn_size, ASIZE).to(device)
+        self.critic = Critic(self.obs_size, self.rnn_size).to(device)
+
         # load rnn and controller if they were previously saved
         if exists(rnn_file):
             rnn_state = torch.load(rnn_file, map_location={'cuda:0': str(device)})
@@ -69,33 +73,84 @@ class BigModel(nn.Module):
             ctrl_state = torch.load(ctrl_file, map_location={'cuda:0': str(device)})
             print("Loading Controller with reward {}".format(
                 ctrl_state['reward']))
-            self.qnet.load_state_dict(ctrl_state['critic_state_dict'])
-            self.target_qnet.load_state_dict(ctrl_state['critic_state_dict'])
+            self.critic.load_state_dict(ctrl_state['critic_state_dict'])
+            self.actor.load_state_dict(ctrl_state['actor_state_dict'])
 
         self.device = device
         self.time_limit = time_limit
+
+        if prioritized_replay:
+            self.replay = ProportionalReplay(max_buffer_size, prioritized_replay_alpha)
+        else:
+            self.replay = ExperienceReplay(max_buffer_size)
+
 
     # assumes obs and hidden are already tensors on device
     def rnn_forward(self, latent_mu, hidden):
         # get actions
         if self.use_vrnn:
-            Q = self.qnet(latent_mu, reparameterize(hidden[0]))
+            probs = self.actor(latent_mu, reparameterize(hidden[0]))
         else:
-            Q = self.qnet(latent_mu, hidden[0])
-        Q = torch.stack(Q) # from list of 1D tensors to 2D tensor
+            probs = self.actor(latent_mu, hidden[0])
+        dists = [Categorical(p) for p in probs] # distribution over actions for each agent
+        actions = [dist.sample() for dist in dists]
 
-        rands = torch.empty_like(Q).uniform_(0, 1)
-        rand_mask = rands.le(eps)
-        rand_actions = torch.multinomial(torch.ones(self.env.action_space.n), self.env.num_agents, replacement=True)
-        max_actions = Q.argmax(dim=1) # currently not breaking ties fairly
-        actions = torch.where(rand_mask, rand_actions, max_actions)
+        # save log probs and average entropy
+        log_probs = [dist.log_prob(action) for dist, action in zip(dists, actions)]
+        avg_entropy = sum([dist.entropy() for dist in dists])/len(dists)
 
         # forward through rnn
-        mu, sigma, logpi, r, d, next_hidden = self.rnn(actions.float().unsqueeze(0), latent_mu, hidden)
-        self.rnn_loss_args = (mu, sigma, logpi, r, d, latent_mu, next_hidden)
+        mu, sigma, logpi, r, d, next_hidden = self.rnn(torch.cat(actions).float().unsqueeze(0), latent_mu, hidden)
+        #self.rnn_loss_args.append((mu, sigma, logpi, r, d, latent_mu, next_hidden)) #TODO: include
 
         actions = [action.item() for action in actions]
-        return actions, next_hidden
+        taken_action_probs = [p[0][a] for (p,a) in zip(probs, actions)] # list of num_agents floats
+
+        return [actions, log_probs, avg_entropy, next_hidden, taken_action_probs]
+
+   
+    def add_rollout_to_buffer(self):
+        obs = self.env.reset()
+        rnn_size = self.rnn_size*2 if self.use_vrnn else self.rnn_size
+        rnn_hidden = [
+            torch.zeros(1, rnn_size).to(self.device)
+            for _ in range(2)]
+        done = False
+        rollout = []
+        total_reward = 0
+
+        while not done: # will happen after env time_limit, at latest
+            rnn_in = self.get_rnn_in(obs)
+            actions, _, _, rnn_hidden, taken_action_probs = self.rnn_forward(rnn_in, rnn_hidden)
+            obs, reward, done, _ = self.env.step(actions)
+
+            state = rnn_in.to("cpu")
+            state, actions, reward, taken_action_probs = [np.array(x) for x in [state, actions, reward, taken_action_probs]]
+            rollout.append((state, actions, reward, taken_action_probs))
+
+            total_reward += reward
+
+        self.replay.add(rollout)
+        return total_reward
+            
+
+    # takes raw obs from environment
+    # returns latent from vae
+    def get_rnn_in(self, obs):
+        if self.simple:
+            obs = torch.Tensor(obs)/2 # normalize to [0,1]
+        else:
+            obs = img_transform(obs)
+        obs = obs.unsqueeze(0).to(self.device)
+
+        if self.simple:
+            return obs
+
+        # forward pass through fixed world model
+        with torch.no_grad():
+            _, latent_mu, _ = self.vae(obs)
+        return latent_mu
+
 
 
     def get_mdrnn_loss(self, latent_next_obs, reward, done, include_reward: bool):
