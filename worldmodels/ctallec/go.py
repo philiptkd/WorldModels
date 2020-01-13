@@ -104,10 +104,11 @@ def check_grads(t):
 # for now, igorning the fact that the target and behavior policies are different
 def get_grads(env, big_model):
     # sample from replay buffer
-    # weights and indicies are both of length batch_size
+    # weights and indices are both of length batch_size
     # the others are arrays of size (batch_size, max_rollout_len, *)
     beta = 1 #beta0 + episode*(1-beta0)/episodes   # linear annealing schedule for IS weights. #TODO: turn back on
-    states, actions, rewards, probs, weights, indicies = big_model.replay.sample(batch_size, beta)
+    states, actions, rewards, weights, indices = big_model.replay.sample(batch_size, beta)
+
     states = states.squeeze().transpose((1, 0, 2)) # (max_rollout_len, batch_size, latent_size)
 
     rewards = rewards.transpose() # (max_rollout_len, batch_size)
@@ -137,7 +138,8 @@ def get_grads(env, big_model):
             state_value = big_model.critic(state, reparameterize(rnn_hidden[0]))
         else:
             state_value = big_model.critic(state, rnn_hidden[0])
-        
+        state_value = state_value.squeeze() # should now be shape (batch_size, )
+
         # mask state_value and ret
         state_value = state_value * mask
         ret = ret * mask
@@ -148,8 +150,9 @@ def get_grads(env, big_model):
         # get losses for the actor
         advantage = ret - state_value.detach() # (batch_size,)
         weighted_advantage = advantage * weights # prioritized replay
-        _, log_probs, avg_entropy, rnn_hidden, these_probs = big_model.rnn_forward(state, rnn_hidden)
-        log_probs = log_probs.transpose() # (num_agents, batch_size)
+
+        _, log_probs, avg_entropy, rnn_hidden = big_model.rnn_forward(state, rnn_hidden)
+
         policy_losses += [-log_prob * weighted_advantage for log_prob in log_probs] # add all agents' policy losses
         entropies.append(avg_entropy * mask) 
 
@@ -163,7 +166,7 @@ def get_grads(env, big_model):
         avg_advantage += (advantage - avg_advantage)/(t+1)
 
     # update priority replay priorities
-    big_model.replay.update_priorities(indices, np.abs(avg_advantage)+1e-3)   # add small number to prevent never sampling 0 error transitions
+    big_model.replay.update_priorities(indices, np.abs(avg_advantage.cpu())+1e-3)   # add small number to prevent never sampling 0 error transitions
 
     # update gradients
     loss = torch.stack(policy_losses).sum() + torch.stack(critic_losses).sum() - torch.stack(entropies).sum()

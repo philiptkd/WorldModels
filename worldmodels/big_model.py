@@ -92,21 +92,26 @@ class BigModel(nn.Module):
             probs = self.actor(latent_mu, reparameterize(hidden[0]))
         else:
             probs = self.actor(latent_mu, hidden[0])
+
         dists = [Categorical(p) for p in probs] # distribution over actions for each agent
-        actions = [dist.sample() for dist in dists]
+        actions = [dist.sample() for dist in dists] # [(1,), (1,)] or [(20,), (20,)]
+        actions = torch.stack(actions, dim=1).float() # (20, 2)
 
         # save log probs and average entropy
-        log_probs = [dist.log_prob(action) for dist, action in zip(dists, actions)]
+        # dists is a list of length 2, but actions has length 20 (shape (20, 2))
+        log_probs = [dist.log_prob(action) for dist, action in zip(dists, actions.transpose(0,1))]
         avg_entropy = sum([dist.entropy() for dist in dists])/len(dists)
 
         # forward through rnn
-        mu, sigma, logpi, r, d, next_hidden = self.rnn(torch.cat(actions).float().unsqueeze(0), latent_mu, hidden)
+        mu, sigma, logpi, r, d, next_hidden = self.rnn(actions, latent_mu, hidden)
         #self.rnn_loss_args.append((mu, sigma, logpi, r, d, latent_mu, next_hidden)) #TODO: include
+       
+        actions = actions.squeeze().cpu().numpy().astype(int)
 
-        actions = [action.item() for action in actions]
-        taken_action_probs = [p[0][a] for (p,a) in zip(probs, actions)] # list of num_agents floats
+        # TODO: generalize this to batch case
+        # taken_action_probs = [p[0][a] for (p,a) in zip(probs, actions)] # list of num_agents floats
 
-        return [actions, log_probs, avg_entropy, next_hidden, taken_action_probs]
+        return [actions, log_probs, avg_entropy, next_hidden] #, taken_action_probs]
 
    
     def add_rollout_to_buffer(self):
@@ -121,12 +126,14 @@ class BigModel(nn.Module):
 
         while not done: # will happen after env time_limit, at latest
             rnn_in = self.get_rnn_in(obs)
-            actions, _, _, rnn_hidden, taken_action_probs = self.rnn_forward(rnn_in, rnn_hidden)
+            actions, _, _, rnn_hidden = self.rnn_forward(rnn_in, rnn_hidden)
+
             obs, reward, done, _ = self.env.step(actions)
 
             state = rnn_in.to("cpu")
-            state, actions, reward, taken_action_probs = [np.array(x) for x in [state, actions, reward, taken_action_probs]]
-            rollout.append((state, actions, reward, taken_action_probs))
+            state, actions, reward = [np.array(x) for x in [state, actions, reward]]
+
+            rollout.append((state, actions, reward))
 
             total_reward += reward
 

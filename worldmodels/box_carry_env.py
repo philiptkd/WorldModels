@@ -132,7 +132,8 @@ class BoxCarryEnv(gym.Env):
         return self.render()
 
     def step(self, actions):
-        assert len(actions) == self.num_agents and all([self.action_space.contains(action) for action in actions])
+        assert len(actions) == self.num_agents and all([self.action_space.contains(action) for action in actions]), \
+                "len(actions) = " + str(len(actions))
             
         grabbers = [i for (i,x) in enumerate(self.agents_grabbing) if x == 1]
         non_grabbers = [i for i in range(self.num_agents) if i not in grabbers]

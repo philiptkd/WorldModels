@@ -54,8 +54,8 @@ class GridSpace(Space):
 
 
     def __repr__(self):
-        return "GridSpace(side_length={}, num_agents={}, box_pos={})".format(
-                self.side_length, self.num_agents, self.box_pos)
+        return "GridSpace(side_length={}, num_agents={})".format(
+                self.side_length, self.num_agents)
 
 
     def __eq__(self, other):

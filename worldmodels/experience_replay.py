@@ -28,10 +28,11 @@ class ExperienceReplay():
     def encode_samples(self, idxs):
         # get shapes
         max_rollout_len = max([len(self.buffer[idx]) for idx in idxs])
-        first_dims = (len(idxs), max_rollout_len)
+        batch_size = len(idxs)
+        first_dims = (batch_size, max_rollout_len)
         
         # initialize padded arrays
-        dummy_experience_tuple = self.buffer[idxs[0]][0]
+        dummy_experience_tuple = self.buffer[idxs[0]][0] # to get shapes of tuple components
         padded = [np.zeros((*first_dims, *(x.shape))) for x in dummy_experience_tuple] # one array for each component of experience tuple
 
         # extract experience at given indices
@@ -42,8 +43,7 @@ class ExperienceReplay():
             # insert
             zipped = zip(*rollout) # tuple of arrays of size (batch_size, rollout_len, *)
             for i, small_arr in enumerate(zipped):
-                big_arr = padded[i]
-                big_arr[:, :rollout_len] = small_arr
+                padded[i][:, :rollout_len] = small_arr
 
         return padded # list of arrays of size (batch_size, max_rollout_len, *)
 

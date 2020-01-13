@@ -131,7 +131,8 @@ class MDRNNCell(_MDRNNBase):
         try:
             in_al = torch.cat([action, latent], dim=1)
         except:
-            print(action.shape, latent.shape)
+            # the actions are the wrong shape. currently (1, 40). should be (20, *)
+            print("action.shape: ", action.shape, "\nlatent.shape: ", latent.shape, ", from models/mdrnn.py")
             raise Exception
 
         next_hidden = self.rnn(in_al, hidden)
