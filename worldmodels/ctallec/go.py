@@ -12,7 +12,6 @@ import torch.optim as optim
 from torchvision import transforms
 
 from worldmodels.big_model import BigModel, RED_SIZE, RSIZE, RSIZE_simple
-from worldmodels.vrnn import reparameterize
 
 
 parser = argparse.ArgumentParser(description='Actor Critic')
@@ -28,20 +27,12 @@ parser.add_argument('--log-interval', type=int, default=10,
                     help='interval between training status logs (default: 10)')
 parser.add_argument('--simple', action='store_true',
                     help='use the simple model')
-parser.add_argument('--use_vrnn', action='store_true',
-                    help='use a VRNN for the dynamics model')
-parser.add_argument('--bptt_len', type=int, default=2,
-                    help='steps into the past that gradients backprop through the rnn (default: 2)')
 parser.add_argument('--time_limit', type=int, default=100,
                     help='max number of environment steps per episode (default: 100)')
 parser.add_argument('--target_update_period', type=int, default=1000,
                     help='period for updating the weights of the target critic network (default: 1000)')
 parser.add_argument('--lamb', type=float, default=0.6,
                     help='lambda for TD(lambda) (default: 0.6)')
-parser.add_argument('--kl_coeff', type=float, default=5.0,
-                    help='coefficient for the kl portion of the rnn loss (default: 5.0)')
-parser.add_argument('--predict_terminals', action='store_true',
-                    help='include "done" prediction in rnn loss')
 parser.add_argument('--cooperate', action='store_true',
                     help='require both agents to cooperate to move the box')
 parser.add_argument('--num_episodes', type=int, default=200,
@@ -64,34 +55,32 @@ batch_size = 20
 beta0 = 0.4  # from paper
 
 def hyperparam_search():
-    for predict_terminals in [True, False]:
-        for use_vrnn in [True, False]:
-            for simple in [True]:
-                for grabbers_needed in [1,2]:
-                    if simple:
-                        env = gym.make('BoxCarry-v0', grabbers_needed=grabbers_needed)
-                    else:
-                        env = gym.make('BoxCarryImg-v0', grabbers_needed=grabbers_needed)
+    for simple in [True]:
+        for grabbers_needed in [1,2]:
+            if simple:
+                env = gym.make('BoxCarry-v0', grabbers_needed=grabbers_needed)
+            else:
+                env = gym.make('BoxCarryImg-v0', grabbers_needed=grabbers_needed)
 
-                    env.seed(args.seed)
-                    torch.manual_seed(args.seed)
+            env.seed(args.seed)
+            torch.manual_seed(args.seed)
 
-                    if grabbers_needed == 1:
-                        logdir = "log_dir_two_easy"
-                    elif grabbers_needed == 2:
-                        logdir = "log_dir_two"
+            if grabbers_needed == 1:
+                logdir = "log_dir_two_easy"
+            elif grabbers_needed == 2:
+                logdir = "log_dir_two"
 
-                    big_model = BigModel(logdir, device, args.time_limit, use_vrnn, simple, args.kl_coeff, predict_terminals, env)
-                    optimizer = optim.Adam(big_model.parameters())
+            big_model = BigModel(logdir, device, args.time_limit, simple, env)
+            optimizer = optim.Adam(big_model.parameters())
 
-                    print("grabbers: {}, vrnn: {}, simple: {}, terminals: {}".format(
-                        env.grabbers_needed, big_model.use_vrnn, big_model.simple, big_model.predict_terminals))
-                    
-                    print("avg_reward:", train(env, big_model, optimizer), "\n")
+            print("grabbers: {}, vrnn: {}, simple: {}, terminals: {}".format(
+                env.grabbers_needed, big_model.use_vrnn, big_model.simple, big_model.predict_terminals))
+            
+            print("avg_reward:", train(env, big_model, optimizer), "\n")
         
 
 def check_grads(t):
-    for name, module in zip(["actor", "critic", "rnn"], [big_model.actor, big_model.critic, big_model.rnn]):
+    for name, module in zip(["actor", "critic"], [big_model.actor, big_model.critic]):
         if all([p.grad is None for p in module.parameters()]):
             print("t = "+str(t)+". No gradients for "+name)
         elif all([(p.grad is None) or all(p.grad.flatten() == 0) for p in module.parameters()]):
@@ -119,12 +108,6 @@ def get_grads(env, big_model):
 
     states, returns, weights = [torch.Tensor(x).to(device) for x in [states, returns, weights]]
 
-    # initial rnn input
-    rnn_size = big_model.rnn_size*2 if big_model.use_vrnn else big_model.rnn_size
-    rnn_hidden = [
-        torch.zeros(batch_size, rnn_size).to(device)
-        for _ in range(2)]
-
     critic_losses = []
     policy_losses = []
     entropies = []
@@ -133,11 +116,7 @@ def get_grads(env, big_model):
     for t, (state, ret) in enumerate(zip(states, returns)):
         mask = torch.Tensor([not all([x == 0 for x in y]) for y in state]).to(device) # boolean mask of shape (batch_size,)
 
-        # get losses for the critic
-        if big_model.use_vrnn:
-            state_value = big_model.critic(state, reparameterize(rnn_hidden[0]))
-        else:
-            state_value = big_model.critic(state, rnn_hidden[0])
+        state_value = big_model.critic(state)
         state_value = state_value.squeeze() # should now be shape (batch_size, )
 
         # mask state_value and ret
@@ -151,16 +130,10 @@ def get_grads(env, big_model):
         advantage = ret - state_value.detach() # (batch_size,)
         weighted_advantage = advantage * weights # prioritized replay
 
-        _, log_probs, avg_entropy, rnn_hidden = big_model.rnn_forward(state, rnn_hidden)
+        _, log_probs, avg_entropy = big_model.get_actions(state)
 
         policy_losses += [-log_prob * weighted_advantage for log_prob in log_probs] # add all agents' policy losses
         entropies.append(avg_entropy * mask) 
-
-        # periodically detach to limit backprop through time
-        if (t+1)%args.bptt_len == 0:
-            h = rnn_hidden[0].detach()
-            c = rnn_hidden[1].detach()
-            rnn_hidden = (h, c)
 
         # for updating replay priorities later
         avg_advantage += (advantage - avg_advantage)/(t+1)
@@ -171,10 +144,6 @@ def get_grads(env, big_model):
     # update gradients
     loss = torch.stack(policy_losses).sum() + torch.stack(critic_losses).sum() - torch.stack(entropies).sum()
     loss.backward()
-
-    # TODO: fix mdrnn loss
-    #    mdrnn_loss = big_model.get_mdrnn_loss(rnn_in, reward, done, include_reward=False)["loss"]
-    #mdrnn_loss.backward(retain_graph=True)
 
 
 def train(env, big_model, optimizer):
@@ -218,9 +187,6 @@ def train(env, big_model, optimizer):
                      'critic_state_dict': big_model.critic.state_dict()},
                     join(ctrl_dir, 'best.tar'))
 
-                torch.save({'state_dict': big_model.rnn.state_dict()}, 
-                        join(rnn_dir, 'best.tar'))
-    
     # only returns if not infinite episodes
     return avg_ep_reward
 
@@ -230,12 +196,6 @@ if __name__ == '__main__':
     if args.param_search:
         hyperparam_search()
     else:
-        # Loading model
-        rnn_dir = join(args.logdir, 'rnn')
-        rnn_file = join(rnn_dir, 'best.tar')
-        if not exists(rnn_dir):
-            mkdir(rnn_dir)
-
         # create ctrl dir if non exitent
         ctrl_dir = join(args.logdir, 'ctrl')
         if not exists(ctrl_dir):
@@ -256,7 +216,7 @@ if __name__ == '__main__':
 
         env_size = env.grid_size**2
 
-        big_model = BigModel(args.logdir, device, args.time_limit, args.use_vrnn, args.simple, args.kl_coeff, args.predict_terminals, env)
+        big_model = BigModel(args.logdir, device, args.time_limit, args.simple, env)
         optimizer = optim.Adam(big_model.parameters())
 
         train(env, big_model, optimizer)

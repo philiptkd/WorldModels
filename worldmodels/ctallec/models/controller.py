@@ -47,32 +47,28 @@ class TraceModule(nn.Module):
 
 
 class Actor(TraceModule):
-    def __init__(self, latent_size, rnn_size, num_agents, lamb=1):
+    def __init__(self, latent_size, num_agents, lamb=1):
         super().__init__(lamb)
       
         self.heads= nn.ModuleList()
         for _ in range(num_agents):
-            self.heads.append(nn.Linear(latent_size + rnn_size, BoxCarryEnv.action_space.n))
+            self.heads.append(nn.Linear(latent_size, BoxCarryEnv.action_space.n))
         self.softmax = nn.Softmax(dim=-1)
 
 
-    def forward(self, vae_latents, rnn_hiddens):
-        x = torch.cat([vae_latents, rnn_hiddens], dim=1)
-        action_probs = [self.softmax(head(x)) for head in self.heads]
-
+    def forward(self, vae_latents):
+        action_probs = [self.softmax(head(vae_latents)) for head in self.heads]
         return action_probs
 
 
 
 
 class Critic(TraceModule):
-    def __init__(self, latent_size, rnn_size, lamb=1):
+    def __init__(self, latent_size, lamb=1):
         super().__init__(lamb)
-        self.fc = nn.Linear(latent_size + rnn_size, 1)
+        self.fc = nn.Linear(latent_size, 1)
 
 
-    def forward(self, vae_latents, rnn_hiddens):
-        x = torch.cat([vae_latents, rnn_hiddens], dim=1)
-        state_values = self.fc(x)
-
+    def forward(self, vae_latents):
+        state_values = self.fc(vae_latents)
         return state_values
